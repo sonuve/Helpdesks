@@ -1,4 +1,5 @@
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { Button } from "@/components/ui/button.tsx";
 import { authClient } from "../lib/auth-client.ts";
 import { useAuth } from "../hooks/useAuth.ts";
 
@@ -12,17 +13,20 @@ export function NavBar() {
   }
 
   return (
-    <nav className="flex items-center justify-between border-b border-gray-200 px-6 py-4 dark:border-gray-800">
-      <span className="font-semibold text-gray-900 dark:text-gray-100">Helpdesks</span>
+    <nav className="flex items-center justify-between border-b border-border bg-white px-6 py-4">
+      <div className="flex items-center gap-4">
+        <span className="font-semibold text-foreground">Helpdesks</span>
+        {user?.role === "ADMIN" && (
+          <Button asChild type="button" variant="ghost" size="sm">
+            <Link to="/users">Users</Link>
+          </Button>
+        )}
+      </div>
       <div className="flex items-center gap-3">
-        <span className="text-gray-600 dark:text-gray-400">{user?.name}</span>
-        <button
-          type="button"
-          onClick={handleSignOut}
-          className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-        >
+        <span className="text-muted-foreground">{user?.name}</span>
+        <Button type="button" variant="outline" size="sm" onClick={handleSignOut}>
           Sign out
-        </button>
+        </Button>
       </div>
     </nav>
   );
