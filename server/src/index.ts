@@ -2,6 +2,7 @@ import express, { type Request, type Response } from "express";
 import { toNodeHandler } from "better-auth/node";
 import { auth } from "./lib/auth.js";
 import { prisma } from "./lib/prisma.js";
+import { sessionMiddleware } from "./middleware/session.js";
 
 const app = express();
 const port = process.env.PORT ?? 3001;
@@ -9,6 +10,7 @@ const port = process.env.PORT ?? 3001;
 app.all("/api/auth/*splat", toNodeHandler(auth));
 
 app.use(express.json());
+app.use(sessionMiddleware);
 
 app.get("/api/health", async (_req: Request, res: Response) => {
   try {
@@ -21,6 +23,13 @@ app.get("/api/health", async (_req: Request, res: Response) => {
 
 app.get("/api/hello", (_req: Request, res: Response) => {
   res.json({ message: "Hello from the Express + Bun API" });
+});
+
+app.get("/api/me", (req: Request, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  res.json({ user: req.user });
 });
 
 app.listen(port, () => {
