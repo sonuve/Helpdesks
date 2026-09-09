@@ -12,10 +12,8 @@ export function HomePage() {
 
   return (
     <section className="flex flex-grow flex-col items-center justify-center gap-6 p-8 text-center">
-      <h1 className="text-5xl font-medium tracking-tight text-gray-900 dark:text-gray-100">
-        Helpdesks
-      </h1>
-      <p className="text-gray-500 dark:text-gray-400">{healthMessage}</p>
+      <h1 className="text-5xl font-medium tracking-tight text-foreground">Helpdesks</h1>
+      <p className="text-muted-foreground">{healthMessage}</p>
     </section>
   );
 }
