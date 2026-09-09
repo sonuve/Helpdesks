@@ -10,8 +10,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@hookform/resolvers": "^3.10.0",
+    "better-auth": "^1.7.3",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "react-hook-form": "^7.65.0",
+    "react-router-dom": "^7.9.6",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

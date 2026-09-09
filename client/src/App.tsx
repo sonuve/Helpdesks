@@ -1,22 +1,21 @@
-import { useEffect, useState } from 'react'
-import './App.css'
+import { Navigate, Route, Routes } from "react-router-dom";
+import { GuestRoute } from "./components/GuestRoute.tsx";
+import { ProtectedRoute } from "./components/ProtectedRoute.tsx";
+import { LoginPage } from "./pages/LoginPage.tsx";
+import { HomePage } from "./pages/HomePage.tsx";
 
 function App() {
-  const [healthMessage, setHealthMessage] = useState('Checking API health...')
-
-  useEffect(() => {
-    fetch('/api/health')
-      .then((res) => res.json())
-      .then((data: { status: string }) => setHealthMessage(`API status: ${data.status}`))
-      .catch(() => setHealthMessage('Could not reach the API — is the server running?'))
-  }, [])
-
   return (
-    <section id="center">
-      <h1>Helpdesks</h1>
-      <p>{healthMessage}</p>
-    </section>
-  )
+    <Routes>
+      <Route element={<GuestRoute />}>
+        <Route path="/login" element={<LoginPage />} />
+      </Route>
+      <Route element={<ProtectedRoute />}>
+        <Route path="/" element={<HomePage />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
 }
 
-export default App
+export default App;

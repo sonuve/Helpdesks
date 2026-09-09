@@ -7,6 +7,9 @@ export const auth = betterAuth({
   database: prismaAdapter(prisma, {
     provider: "postgresql",
   }),
+  // Mirrors the CORS origin below so both origin checks move together;
+  // falls back to the Vite dev default when CLIENT_ORIGIN isn't set.
+  trustedOrigins: [process.env.CLIENT_ORIGIN ?? "http://localhost:5173"],
   user: {
     additionalFields: {
       role: {

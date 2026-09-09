@@ -1,4 +1,5 @@
 import express, { type Request, type Response } from "express";
+import cors from "cors";
 import { toNodeHandler } from "better-auth/node";
 import { auth } from "./lib/auth.js";
 import { prisma } from "./lib/prisma.js";
@@ -6,7 +7,9 @@ import { sessionMiddleware } from "./middleware/session.js";
 
 const app = express();
 const port = process.env.PORT ?? 3001;
+const clientOrigin = process.env.CLIENT_ORIGIN ?? "http://localhost:5173";
 
+app.use(cors({ origin: clientOrigin, credentials: true }));
 app.all("/api/auth/*splat", toNodeHandler(auth));
 
 app.use(express.json());
