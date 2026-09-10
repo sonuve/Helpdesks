@@ -1,10 +1,11 @@
 import express, { type Request, type Response } from "express";
 import cors from "cors";
-import rateLimit from "express-rate-limit";
 import { toNodeHandler } from "better-auth/node";
 import { auth } from "./lib/auth.js";
 import { prisma } from "./lib/prisma.js";
 import { sessionMiddleware } from "./middleware/session.js";
+import { apiLimiter } from "./middleware/rate-limit.js";
+import { usersRouter } from "./routes/users.js";
 
 const app = express();
 const port = process.env.PORT ?? 3001;
@@ -28,13 +29,6 @@ app.all("/api/auth/*splat", toNodeHandler(auth));
 app.use(express.json());
 app.use(sessionMiddleware);
 
-const apiLimiter = rateLimit({
-  windowMs: 60_000,
-  limit: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
 // No limiter here: this is an infra health probe (e.g. the ALB target
 // group) and must not be throttled.
 app.get("/api/health", async (_req: Request, res: Response) => {
@@ -50,38 +44,7 @@ app.get("/api/hello", apiLimiter, (_req: Request, res: Response) => {
   res.json({ message: "Hello from the Express + Bun API" });
 });
 
-app.get("/api/me", apiLimiter, (req: Request, res: Response) => {
-  if (!req.user) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-  if (req.user.role !== "ADMIN") {
-    return res.status(403).json({ error: "Forbidden" });
-  }
-  res.json({ user: req.user });
-});
-
-app.get("/api/users", apiLimiter, async (req: Request, res: Response) => {
-  if (!req.user) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-  if (req.user.role !== "ADMIN") {
-    return res.status(403).json({ error: "Forbidden" });
-  }
-
-  const users = await prisma.user.findMany({
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-      emailVerified: true,
-      createdAt: true,
-    },
-    orderBy: { createdAt: "asc" },
-  });
-
-  res.json({ users });
-});
+app.use(usersRouter);
 
 app.listen(port, () => {
   console.log(`Server listening on http://localhost:${port}`);
