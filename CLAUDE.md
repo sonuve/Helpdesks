@@ -29,6 +29,8 @@ This is a Bun workspace monorepo with three packages:
 - **`client/`** — React + TypeScript SPA scaffolded with Vite.
 - **`e2e/`** — Playwright e2e test harness, isolated from the dev database via a separate `helpdesk_test` Postgres database. Harness mechanics (webServer setup, `.env.test`, fixture seeding, `reuseExistingServer` caveats, rate-limit interaction) live in the `e2e-test-writer` agent (`.claude/agents/e2e-test-writer.md`) rather than here, since they only matter when actually writing/running e2e tests — read that file before touching anything under `e2e/`.
 
+**When writing or updating e2e tests, delegate to the `e2e-test-writer` subagent** (`Agent` tool, `subagent_type: "e2e-test-writer"`) instead of writing Playwright specs directly — it knows the fixture-seeding requirement (the test DB starts empty and public signup is disabled), the shared sign-in rate-limit budget across a run, and the port-reuse footgun with an already-running dev server. Writing specs inline without that context risks flaky or dev-data-corrupting tests. This applies whether the request is to add coverage for a new flow or to update existing specs under `e2e/tests/`.
+
 In development, the client's Vite dev server proxies `/api/*` requests to the server (`client/vite.config.ts` → `http://localhost:3001`), so the client fetches same-origin paths like `/api/health` without CORS configuration.
 
 The current server (`server/src/index.ts`) is a minimal scaffold exposing `/api/health` and `/api/hello` — it exists to prove the client/server/proxy wiring, not as a feature implementation.
