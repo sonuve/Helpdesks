@@ -33,6 +33,18 @@ In development, the client's Vite dev server proxies `/api/*` requests to the se
 
 The current server (`server/src/index.ts`) is a minimal scaffold exposing `/api/health` and `/api/hello` — it exists to prove the client/server/proxy wiring, not as a feature implementation.
 
+### Rate limiting
+
+Two layers, both IP-keyed:
+
+- **`/api/auth/*`** (sign-in, sign-up, session, etc.): better-auth's built-in limiter (`server/src/lib/auth.ts`), forced on in all environments (`enabled: true`) rather than its "production only" default, so dev/test behavior matches prod. Sign-in/sign-up/password-change get a stricter built-in 3-requests/10s rule automatically; everything else under `/api/auth` gets the configured 100/60s default. Counters are stored in Postgres (`rate_limit` table, added by the `add_rate_limit_table` migration) rather than in-memory, so counts stay correct across multiple server instances — no Redis dependency needed just for this.
+- **Everything else** (`/api/hello`, `/api/me`): `express-rate-limit` (`server/src/index.ts`), 100 requests/60s, in-memory. `/api/health` is deliberately excluded — it's an infra health probe (ALB target group) and must not be throttled.
+
+Both need the real client IP to key correctly, which only works if two things are set per environment:
+
+- **`NODE_ENV`** — must be `development`/`test`/`production` (set in `server/.env`, `server/.env.test`, and the production task definition respectively). Without it, better-auth's own IP resolution can't identify local requests and every client collapses into one shared bucket per path — a real correctness bug, not just a missing nicety.
+- **`TRUSTED_PROXY_CIDRS`** — comma-separated CIDR list of trusted proxies, read by both `app.set("trust proxy", ...)` in `index.ts` and better-auth's `advanced.ipAddress.trustedProxies` in `auth.ts`. Empty in dev/test (no proxy in front locally). In production, set it to the VPC CIDR the ALB forwards from (see `tech-stack.md`'s deployment section) — without it, `X-Forwarded-For` isn't trusted and every request behind the ALB looks like it comes from the same place.
+
 ### Planning documents vs. current code
 
 The root-level docs describe the target product and are well ahead of what's implemented:
