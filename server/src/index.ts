@@ -20,7 +20,7 @@ app.get("/api/health", async (_req: Request, res: Response) => {
     await prisma.$queryRaw`SELECT 1`;
     res.json({ status: "ok", database: "connected" });
   } catch {
-    res.status(503).json({ status: "ok", database: "unreachable" });
+    res.status(503).json({ status: "error", database: "unreachable" });
   }
 });
 
@@ -31,6 +31,9 @@ app.get("/api/hello", (_req: Request, res: Response) => {
 app.get("/api/me", (req: Request, res: Response) => {
   if (!req.user) {
     return res.status(401).json({ error: "Unauthorized" });
+  }
+  if (req.user.role !== "ADMIN") {
+    return res.status(403).json({ error: "Forbidden" });
   }
   res.json({ user: req.user });
 });
