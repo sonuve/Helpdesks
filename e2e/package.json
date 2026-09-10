@@ -4,8 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "test": "playwright test",
-    "test:ui": "playwright test --ui"
+    "test": "./scripts/free-dev-ports.sh && playwright test",
+    "test:ui": "./scripts/free-dev-ports.sh && playwright test --ui"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.1",

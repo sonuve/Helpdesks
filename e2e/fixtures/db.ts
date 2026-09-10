@@ -30,15 +30,16 @@ export async function upsertTestUser(fixture: TestUser) {
   const hashedPassword = await ctx.password.hash(fixture.password);
   const now = new Date();
   const role = fixture.role === "ADMIN" ? Role.ADMIN : Role.AGENT;
+  const emailVerified = fixture.emailVerified ?? true;
 
   const user = await prisma.user.upsert({
     where: { email: fixture.email },
-    update: { name: fixture.name, role, emailVerified: true, updatedAt: now },
+    update: { name: fixture.name, role, emailVerified, updatedAt: now },
     create: {
       id: randomUUID(),
       name: fixture.name,
       email: fixture.email,
-      emailVerified: true,
+      emailVerified,
       role,
       createdAt: now,
       updatedAt: now,

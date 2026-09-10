@@ -14,7 +14,17 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: "html",
+  reporter: [["html", { outputFolder: path.resolve(import.meta.dirname, "playwright-report") }]],
+  // Pinned to an absolute path anchored at this config file rather than
+  // left as Playwright's relative-path default, which resolves against
+  // whatever process's cwd actually invoked `playwright test` — that's
+  // e2e/ for `bun run test:e2e`, but not necessarily true for every
+  // runner (e.g. the VS Code Playwright extension, or a bare `npx
+  // playwright test --config=e2e/playwright.config.ts` from the repo
+  // root). Pinning both this and the HTML reporter's outputFolder above
+  // keeps test-results/ and playwright-report/ under e2e/ no matter how
+  // the suite is launched.
+  outputDir: path.resolve(import.meta.dirname, "test-results"),
   globalSetup: "./global-setup.ts",
 
   use: {
@@ -53,9 +63,23 @@ export default defineConfig({
     },
     {
       name: "chromium",
-      testIgnore: /auth\.setup\.ts/,
+      testIgnore: [/auth\.setup\.ts/, /auth-security\.spec\.ts/],
       use: { ...devices["Desktop Chrome"] },
       dependencies: ["setup"],
+    },
+    // tests/auth-security.spec.ts deliberately exhausts the shared sign-in
+    // rate limit budget (and separately signs in with an unverified
+    // account) — both are real /sign-in/email calls sharing the same
+    // IP-keyed bucket every other spec's real sign-ins use. Running it as
+    // its own project that depends on "chromium" guarantees every other
+    // real sign-in in the suite has already finished before this starts,
+    // so it can't starve them (or be starved/raced by them). See the
+    // comment at the top of that file for the rest of the reasoning.
+    {
+      name: "auth-security",
+      testMatch: /auth-security\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+      dependencies: ["chromium"],
     },
   ],
 });

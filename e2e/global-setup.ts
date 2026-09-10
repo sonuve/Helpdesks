@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import path from "node:path";
 import { config as loadEnv } from "dotenv";
-import { ADMIN_USER, AGENT_USER } from "./fixtures/users.ts";
+import { ADMIN_USER, AGENT_USER, UNVERIFIED_USER } from "./fixtures/users.ts";
 import { disconnectDb, resetRateLimit, upsertTestUser } from "./fixtures/db.ts";
 
 export default async function globalSetup() {
@@ -30,6 +30,10 @@ export default async function globalSetup() {
   // Prisma (mirroring server/prisma/seed.ts). Upserts are idempotent.
   await upsertTestUser(ADMIN_USER);
   await upsertTestUser(AGENT_USER);
+  // Unverified account for tests/auth-security.spec.ts's
+  // requireEmailVerification coverage. Never signs in successfully, so it
+  // doesn't need a storageState like the two accounts above.
+  await upsertTestUser(UNVERIFIED_USER);
 
   // Start every run with a clean sign-in rate limit budget — see
   // fixtures/db.ts's resetRateLimit for why this is necessary and safe.
