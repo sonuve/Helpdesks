@@ -2,12 +2,13 @@
   "name": "helpdesks",
   "private": true,
   "version": "0.0.0",
-  "workspaces": ["client", "server"],
+  "workspaces": ["client", "server", "e2e"],
   "scripts": {
     "dev": "bun run --filter '*' dev",
     "dev:client": "bun run --filter client dev",
     "dev:server": "bun run --filter server dev",
     "build": "bun run --filter client build",
-    "typecheck": "bun run --filter server typecheck"
+    "typecheck": "bun run --filter server typecheck",
+    "test:e2e": "bun run --filter e2e test"
   }
 }

@@ -8,24 +8,26 @@ Use the `context7` MCP tool to fetch up-to-date documentation for this project's
 
 ## Commands
 
-All commands run from the repo root via Bun workspaces (`client`, `server`).
+All commands run from the repo root via Bun workspaces (`client`, `server`, `e2e`).
 
-- `bun install` — install/link dependencies for both workspaces
+- `bun install` — install/link dependencies for all workspaces
 - `bun run dev` — run client and server dev servers together (`bun run --filter '*' dev`)
 - `bun run dev:client` — client only (Vite dev server, default port 5173, falls back to next free port)
 - `bun run dev:server` — server only (`bun --watch server/src/index.ts`, port 3001 by default, override with `PORT`)
 - `bun run build` — production build of the client (`tsc -b && vite build` in `client/`)
 - `bun run typecheck` — typecheck the server (`tsc --noEmit` in `server/`); the client typechecks as part of its own `build`
 - `cd client && bun run lint` — lint the client with oxlint
+- `bun run test:e2e` — run Playwright e2e tests (`e2e/`). See the `e2e-test-writer` agent (`.claude/agents/e2e-test-writer.md`) for harness mechanics (separate test database, fixture seeding, rate-limit interaction).
 
-No test runner is configured yet in either workspace.
+No unit test runner is configured yet in either workspace.
 
 ## Architecture
 
-This is a Bun workspace monorepo with two packages:
+This is a Bun workspace monorepo with three packages:
 
 - **`server/`** — Express 5 API. Bun runs the TypeScript source directly (`bun --watch src/index.ts`); there is no compile step for the server, `tsc` is used for type-checking only (`noEmit: true` in `server/tsconfig.json`).
 - **`client/`** — React + TypeScript SPA scaffolded with Vite.
+- **`e2e/`** — Playwright e2e test harness, isolated from the dev database via a separate `helpdesk_test` Postgres database. Harness mechanics (webServer setup, `.env.test`, fixture seeding, `reuseExistingServer` caveats, rate-limit interaction) live in the `e2e-test-writer` agent (`.claude/agents/e2e-test-writer.md`) rather than here, since they only matter when actually writing/running e2e tests — read that file before touching anything under `e2e/`.
 
 In development, the client's Vite dev server proxies `/api/*` requests to the server (`client/vite.config.ts` → `http://localhost:3001`), so the client fetches same-origin paths like `/api/health` without CORS configuration.
 
