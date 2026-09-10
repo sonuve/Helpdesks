@@ -6,6 +6,7 @@ import { prisma } from "./lib/prisma.js";
 import { sessionMiddleware } from "./middleware/session.js";
 import { apiLimiter } from "./middleware/rate-limit.js";
 import { usersRouter } from "./routes/users.js";
+import { ticketsRouter } from "./routes/tickets.js";
 
 const app = express();
 const port = process.env.PORT ?? 3001;
@@ -45,6 +46,7 @@ app.get("/api/hello", apiLimiter, (_req: Request, res: Response) => {
 });
 
 app.use(usersRouter);
+app.use(ticketsRouter);
 
 app.listen(port, () => {
   console.log(`Server listening on http://localhost:${port}`);

@@ -89,3 +89,34 @@ model RateLimit {
 
   @@map("rate_limit")
 }
+
+enum TicketStatus {
+  OPEN
+  RESOLVED
+  CLOSED
+}
+
+enum TicketCategory {
+  GENERAL_QUESTION
+  TECHNICAL_QUESTION
+  REFUND_REQUEST
+}
+
+// No email-provider fields like a Message-ID: threading strategy is still
+// an open question in project-scope.md, and there's no real provider
+// integration yet — see POST /api/tickets.
+model Ticket {
+  id             Int             @id @default(autoincrement())
+  status         TicketStatus    @default(OPEN)
+  // Optional, no default: nothing populates this yet (AI classification is
+  // a later implementation-plan phase) — it's unset, not defaulted to a
+  // guessed category, until that's built.
+  category       TicketCategory?
+  subject        String
+  body           String
+  requesterEmail String
+  createdAt      DateTime
+  updatedAt      DateTime
+
+  @@map("ticket")
+}
