@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import axios from "axios";
+import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge.tsx";
+import { Skeleton } from "@/components/ui/skeleton.tsx";
 import {
   Table,
   TableBody,
@@ -21,44 +23,35 @@ type UserListItem = {
 };
 
 export function UsersPage() {
-  const [users, setUsers] = useState<UserListItem[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    fetch("/api/users")
-      .then(async (res) => {
-        if (!res.ok) {
-          throw new Error(`Failed to load users (${res.status})`);
-        }
-        return (await res.json()) as { users: UserListItem[] };
-      })
-      .then((data) => {
-        if (!cancelled) setUsers(data.users);
-      })
-      .catch(() => {
-        if (!cancelled) setError("Could not load users — is the server running?");
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data: users, isPending, isError } = useQuery({
+    queryKey: ["users"],
+    queryFn: async () => {
+      const { data } = await axios.get<{ users: UserListItem[] }>("/api/users");
+      return data.users;
+    },
+  });
 
   return (
     <section className="flex flex-grow flex-col gap-6 p-8">
       <h1 className="text-3xl font-medium tracking-tight text-foreground">Users</h1>
 
-      {error && <p className="text-destructive">{error}</p>}
+      {isError && (
+        <p className="text-destructive">Could not load users — is the server running?</p>
+      )}
 
-      {!error && !users && <p className="text-muted-foreground">Loading users…</p>}
+      {!isError && isPending && (
+        <div className="flex flex-col gap-3">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className="h-10 w-full" />
+          ))}
+        </div>
+      )}
 
-      {!error && users && users.length === 0 && (
+      {!isError && users && users.length === 0 && (
         <p className="text-muted-foreground">No users found.</p>
       )}
 
-      {!error && users && users.length > 0 && (
+      {!isError && users && users.length > 0 && (
         <Table>
           <TableHeader>
             <TableRow>

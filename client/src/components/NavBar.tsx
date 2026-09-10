@@ -15,7 +15,9 @@ export function NavBar() {
   return (
     <nav className="flex items-center justify-between border-b border-border bg-white px-6 py-4">
       <div className="flex items-center gap-4">
-        <span className="font-semibold text-foreground">Helpdesks</span>
+        <Link to="/" className="font-semibold text-foreground">
+          Helpdesks
+        </Link>
         {user?.role === "ADMIN" && (
           <Button asChild type="button" variant="ghost" size="sm">
             <Link to="/users">Users</Link>
