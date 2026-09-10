@@ -21,7 +21,7 @@ export function CreateUserDialog() {
         <DialogHeader>
           <DialogTitle>Create user</DialogTitle>
         </DialogHeader>
-        <UserForm onSuccess={() => setOpen(false)} />
+        <UserForm mode="create" onSuccess={() => setOpen(false)} />
       </DialogContent>
     </Dialog>
   );

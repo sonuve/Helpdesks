@@ -47,6 +47,14 @@ export const auth = betterAuth({
         input: false,
         defaultValue: Role.AGENT,
       },
+      // Soft-delete marker (server/src/routes/users.ts DELETE /api/users/:id).
+      // Declared here so it comes back on every session lookup and
+      // sessionMiddleware can gate access on it below.
+      deletedAt: {
+        type: "date",
+        required: false,
+        input: false,
+      },
     },
   },
   emailAndPassword: {

@@ -1,6 +1,10 @@
 import axios from "axios";
+import { Role } from "core";
+import { PencilIcon, Trash2Icon } from "lucide-react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge.tsx";
+import { Button } from "@/components/ui/button.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import {
   Table,
@@ -10,19 +14,21 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table.tsx";
-
-type UserRole = "ADMIN" | "AGENT";
+import { DeleteUserDialog } from "./DeleteUserDialog.tsx";
+import { EditUserDialog } from "./EditUserDialog.tsx";
 
 type UserListItem = {
   id: string;
   name: string;
   email: string;
-  role: UserRole;
+  role: Role;
   emailVerified: boolean;
   createdAt: string;
 };
 
 export function UsersTable() {
+  const [editingUser, setEditingUser] = useState<UserListItem | null>(null);
+  const [deletingUser, setDeletingUser] = useState<UserListItem | null>(null);
   const { data: users, isPending, isError } = useQuery({
     queryKey: ["users"],
     queryFn: async () => {
@@ -50,37 +56,73 @@ export function UsersTable() {
   }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Name</TableHead>
-          <TableHead>Email</TableHead>
-          <TableHead>Role</TableHead>
-          <TableHead>Verified</TableHead>
-          <TableHead>Joined</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {users.map((user) => (
-          <TableRow key={user.id}>
-            <TableCell className="font-medium">{user.name}</TableCell>
-            <TableCell>{user.email}</TableCell>
-            <TableCell>
-              <Badge variant={user.role === "ADMIN" ? "default" : "secondary"}>
-                {user.role}
-              </Badge>
-            </TableCell>
-            <TableCell>
-              {user.emailVerified ? (
-                <Badge variant="outline">Verified</Badge>
-              ) : (
-                <Badge variant="destructive">Unverified</Badge>
-              )}
-            </TableCell>
-            <TableCell>{new Date(user.createdAt).toLocaleDateString()}</TableCell>
+    <>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Name</TableHead>
+            <TableHead>Email</TableHead>
+            <TableHead>Role</TableHead>
+            <TableHead>Verified</TableHead>
+            <TableHead>Joined</TableHead>
+            <TableHead className="w-0">
+              <span className="sr-only">Actions</span>
+            </TableHead>
           </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+        </TableHeader>
+        <TableBody>
+          {users.map((user) => (
+            <TableRow key={user.id}>
+              <TableCell className="font-medium">{user.name}</TableCell>
+              <TableCell>{user.email}</TableCell>
+              <TableCell>
+                <Badge variant={user.role === Role.ADMIN ? "default" : "secondary"}>
+                  {user.role}
+                </Badge>
+              </TableCell>
+              <TableCell>
+                {user.emailVerified ? (
+                  <Badge variant="outline">Verified</Badge>
+                ) : (
+                  <Badge variant="destructive">Unverified</Badge>
+                )}
+              </TableCell>
+              <TableCell>{new Date(user.createdAt).toLocaleDateString()}</TableCell>
+              <TableCell>
+                <div className="flex gap-1">
+                  <Button variant="ghost" size="icon-sm" onClick={() => setEditingUser(user)}>
+                    <PencilIcon />
+                    <span className="sr-only">Edit {user.name}</span>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={user.role === Role.ADMIN}
+                    onClick={() => setDeletingUser(user)}
+                  >
+                    <Trash2Icon />
+                    <span className="sr-only">
+                      {user.role === Role.ADMIN ? "Admins cannot be deleted" : `Delete ${user.name}`}
+                    </span>
+                  </Button>
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      <EditUserDialog
+        user={editingUser}
+        onOpenChange={(open) => {
+          if (!open) setEditingUser(null);
+        }}
+      />
+      <DeleteUserDialog
+        user={deletingUser}
+        onOpenChange={(open) => {
+          if (!open) setDeletingUser(null);
+        }}
+      />
+    </>
   );
 }

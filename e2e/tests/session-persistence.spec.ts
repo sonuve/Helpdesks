@@ -45,6 +45,10 @@ test.describe("session persistence for an admin-gated route", () => {
     // reload too — still on /users, not bounced to /.
     await expect(page).toHaveURL("/users");
     await expect(page.getByRole("heading", { name: "Users" })).toBeVisible();
-    await expect(page.getByText(ADMIN_USER.name)).toBeVisible();
+    // Scoped to the nav: the admin fixture is also a row in the users
+    // table below (UsersTable lists every user, including the signed-in
+    // admin themself), so an unscoped getByText(ADMIN_USER.name) is
+    // ambiguous now that that table exists.
+    await expect(page.getByRole("navigation").getByText(ADMIN_USER.name)).toBeVisible();
   });
 });

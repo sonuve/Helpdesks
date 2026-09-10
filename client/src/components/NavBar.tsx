@@ -1,3 +1,4 @@
+import { Role } from "core";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button.tsx";
 import { authClient } from "../lib/auth-client.ts";
@@ -18,7 +19,7 @@ export function NavBar() {
         <Link to="/" className="font-semibold text-foreground">
           Helpdesks
         </Link>
-        {user?.role === "ADMIN" && (
+        {user?.role === Role.ADMIN && (
           <Button asChild type="button" variant="ghost" size="sm">
             <Link to="/users">Users</Link>
           </Button>

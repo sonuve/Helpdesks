@@ -24,6 +24,7 @@ describe("CreateUserDialog", () => {
     expect(screen.getByRole("heading", { name: "Create user" })).toBeInTheDocument();
     expect(screen.getByLabelText("Name")).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expect(screen.getByLabelText("Role")).toBeInTheDocument();
     expect(screen.getByLabelText("Password")).toBeInTheDocument();
   });
 
@@ -35,6 +36,8 @@ describe("CreateUserDialog", () => {
 
     fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Jane Doe" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "jane@example.com" } });
+    fireEvent.click(screen.getByLabelText("Role"));
+    fireEvent.click(await screen.findByRole("option", { name: "Agent" }));
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
     fireEvent.submit(screen.getByRole("dialog").querySelector("form")!);
 
