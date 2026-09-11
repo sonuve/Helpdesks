@@ -18,6 +18,7 @@ const TICKET: Ticket = {
   body: "I would like a refund for my last order.",
   requesterEmail: "customer@example.com",
   assignedTo: null,
+  replies: [],
   createdAt: "2026-02-20T00:00:00.000Z",
   updatedAt: "2026-02-20T00:00:00.000Z",
 };
@@ -30,6 +31,7 @@ const ASSIGNABLE_USERS = [
 beforeEach(() => {
   mockedAxios.get.mockReset();
   mockedAxios.patch.mockReset();
+  mockedAxios.post.mockReset();
 });
 
 // GET /api/tickets/:id and GET /api/users/assignable both fire on render —
@@ -296,5 +298,99 @@ describe("TicketDetailPage", () => {
     await waitFor(() =>
       expect(screen.getByRole("combobox", { name: "Status" })).toHaveTextContent("Closed"),
     );
+  });
+
+  it("shows 'No replies yet.' when the thread is empty", async () => {
+    mockGet();
+
+    renderDetailPage(TICKET.id);
+    await screen.findByText(/Refund request/);
+
+    expect(screen.getByText("No replies yet.")).toBeInTheDocument();
+  });
+
+  it("renders the reply thread, oldest first as returned by the server", async () => {
+    mockGet({
+      ...TICKET,
+      replies: [
+        {
+          id: 1,
+          body: "First reply",
+          senderType: "CUSTOMER",
+          author: { id: "cust1", name: "Requester Bob", email: "customer@example.com" },
+          createdAt: "2026-02-20T01:00:00.000Z",
+        },
+        {
+          id: 2,
+          body: "Second reply",
+          senderType: "AGENT",
+          author: { id: "u2", name: "Admin", email: "admin@example.com" },
+          createdAt: "2026-02-20T02:00:00.000Z",
+        },
+      ],
+    });
+
+    renderDetailPage(TICKET.id);
+    await screen.findByText(/Refund request/);
+
+    expect(screen.getByText("Replies (2)")).toBeInTheDocument();
+    const replyBodies = [screen.getByText("First reply"), screen.getByText("Second reply")];
+    expect(replyBodies[0].compareDocumentPosition(replyBodies[1])).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(screen.getByText("Requester Bob")).toBeInTheDocument();
+    expect(screen.getByText("Admin")).toBeInTheDocument();
+    // Distinguishes the two senderTypes via the badge label, title-cased
+    // like every other wire-value display in this codebase.
+    expect(screen.getByText("Customer")).toBeInTheDocument();
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+  });
+
+  it("submits a new reply and clears the form on success", async () => {
+    mockGet();
+    mockedAxios.post.mockResolvedValue({
+      data: { reply: { id: 1, body: "Thanks!", author: { id: "u1", name: "Agent" } } },
+    });
+
+    renderDetailPage(TICKET.id);
+    await screen.findByText(/Refund request/);
+
+    const textarea = screen.getByRole("textbox", { name: "Reply" });
+    fireEvent.change(textarea, { target: { value: "Thanks!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
+
+    await waitFor(() =>
+      expect(mockedAxios.post).toHaveBeenCalledWith(`/api/tickets/${TICKET.id}/replies`, {
+        body: "Thanks!",
+      }),
+    );
+    await waitFor(() => expect(textarea).toHaveValue(""));
+  });
+
+  it("shows a validation error instead of submitting an empty reply", async () => {
+    mockGet();
+
+    renderDetailPage(TICKET.id);
+    await screen.findByText(/Refund request/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
+
+    expect(await screen.findByText("Reply cannot be empty")).toBeInTheDocument();
+    expect(mockedAxios.post).not.toHaveBeenCalled();
+  });
+
+  it("shows an error message when the reply request fails", async () => {
+    mockGet();
+    mockedAxios.post.mockRejectedValue(new Error("Network error"));
+
+    renderDetailPage(TICKET.id);
+    await screen.findByText(/Refund request/);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Reply" }), {
+      target: { value: "Thanks!" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
+
+    expect(await screen.findByText("Could not send reply. Please try again.")).toBeInTheDocument();
   });
 });

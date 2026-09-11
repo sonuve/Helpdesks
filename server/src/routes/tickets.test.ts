@@ -558,6 +558,10 @@ describe("a single-ticket-scoped session (GET /:id, PATCH /:id/assign)", () => {
         requesterEmail: "detail-fixture@example.com",
         assignedTo: null,
       });
+      // No replies posted yet at this point in the file — the
+      // POST /api/tickets/:id/replies describe below runs later and
+      // asserts the populated-thread case itself.
+      expect(res.body.ticket.replies).toEqual([]);
     });
 
     test("404s for a ticket id that doesn't exist", async () => {
@@ -757,6 +761,82 @@ describe("a single-ticket-scoped session (GET /:id, PATCH /:id/assign)", () => {
 
       expect(res.status).toBe(400);
       expect(res.body).toEqual({ error: "Invalid ticket id" });
+    });
+  });
+
+  // Replies aren't tracked for separate cleanup: TicketReply.ticketId is
+  // `onDelete: Cascade`, so the afterAll above deleting `ticketId` already
+  // removes every reply created here.
+  describe("POST /api/tickets/:id/replies", () => {
+    test("401s when unauthenticated", async () => {
+      const res = await request.post(`/api/tickets/${ticketId}/replies`).send({ body: "Hello" });
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ error: "Unauthorized" });
+    });
+
+    test("creates a reply authored by the requester", async () => {
+      const res = await agent
+        .post(`/api/tickets/${ticketId}/replies`)
+        .send({ body: "Thanks for reaching out." });
+
+      expect(res.status).toBe(201);
+      expect(res.body.reply).toMatchObject({
+        ticketId,
+        body: "Thanks for reaching out.",
+        senderType: "AGENT",
+        author: { id: userId, name: "Server Test Detail Agent" },
+      });
+      expect(typeof res.body.reply.id).toBe("number");
+      expect(typeof res.body.reply.createdAt).toBe("string");
+    });
+
+    test("ignores a client-supplied senderType and always records AGENT", async () => {
+      // There's no customer-facing reply path yet — every caller of this
+      // endpoint is a signed-in agent, so the server must decide
+      // senderType itself rather than trust the request body.
+      const res = await agent
+        .post(`/api/tickets/${ticketId}/replies`)
+        .send({ body: "Spoofed sender attempt", senderType: "CUSTOMER" });
+
+      expect(res.status).toBe(201);
+      expect(res.body.reply.senderType).toBe("AGENT");
+    });
+
+    test("400s for a blank body", async () => {
+      const res = await agent.post(`/api/tickets/${ticketId}/replies`).send({ body: "   " });
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ error: "Reply cannot be empty" });
+    });
+
+    test("400s when body is omitted", async () => {
+      const res = await agent.post(`/api/tickets/${ticketId}/replies`).send({});
+      expect(res.status).toBe(400);
+    });
+
+    test("404s when the ticket doesn't exist", async () => {
+      const res = await agent.post("/api/tickets/999999999/replies").send({ body: "Hi" });
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "Ticket not found" });
+    });
+
+    test("400s for a non-numeric ticket id", async () => {
+      const res = await agent.post("/api/tickets/not-a-number/replies").send({ body: "Hi" });
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ error: "Invalid ticket id" });
+    });
+
+    test("appears in GET /api/tickets/:id's replies, oldest first", async () => {
+      await agent.post(`/api/tickets/${ticketId}/replies`).send({ body: "Second reply" });
+
+      const res = await agent.get(`/api/tickets/${ticketId}`);
+      const bodies = (res.body.ticket.replies as { body: string }[]).map((r) => r.body);
+      // "Spoofed sender attempt" was created by the test above this one —
+      // oldest-first means it lands between the other two.
+      expect(bodies).toEqual([
+        "Thanks for reaching out.",
+        "Spoofed sender attempt",
+        "Second reply",
+      ]);
     });
   });
 });

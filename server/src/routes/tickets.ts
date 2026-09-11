@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
+import { createReplySchema } from "core";
 import { prisma } from "../lib/prisma.js";
 import { apiLimiter } from "../middleware/rate-limit.js";
 import type { Prisma } from "../generated/prisma/client.js";
@@ -10,7 +11,7 @@ import type { Prisma } from "../generated/prisma/client.js";
 // Prisma's own Role instead of core's. core's copies exist for the
 // client, which can't reach this generated output — see CLAUDE.md's
 // "Core enums" section.
-import { TicketCategory, TicketStatus } from "../generated/prisma/enums.js";
+import { ReplySenderType, TicketCategory, TicketStatus } from "../generated/prisma/enums.js";
 
 export const ticketsRouter = Router();
 
@@ -122,7 +123,14 @@ ticketsRouter.get("/api/tickets/:id", apiLimiter, async (req: Request, res: Resp
 
   const ticket = await prisma.ticket.findUnique({
     where: { id: id.data },
-    include: { assignedTo: { select: { id: true, name: true, email: true } } },
+    include: {
+      assignedTo: { select: { id: true, name: true, email: true } },
+      // Oldest first, matching how a chronological reply thread reads.
+      replies: {
+        include: { author: { select: { id: true, name: true, email: true } } },
+        orderBy: { createdAt: "asc" },
+      },
+    },
   });
   if (!ticket) {
     return res.status(404).json({ error: "Ticket not found" });
@@ -240,6 +248,53 @@ ticketsRouter.patch("/api/tickets/:id/assign", apiLimiter, async (req: Request, 
   });
 
   res.json({ ticket });
+});
+
+// Same access rule as every other ticket endpoint: any authenticated user,
+// not just admins. This only records an internal reply on the ticket's
+// thread — actually sending it out as an email is implementation-plan.md's
+// Phase 3 "Manual reply" task, blocked on the same email-provider decision
+// as ingestion (see project-scope.md's "Email ingestion" open question).
+ticketsRouter.post("/api/tickets/:id/replies", apiLimiter, async (req: Request, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const id = z.coerce.number().int().positive().safeParse(req.params.id);
+  if (!id.success) {
+    return res.status(400).json({ error: "Invalid ticket id" });
+  }
+
+  const parsed = createReplySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input" });
+  }
+
+  const existing = await prisma.ticket.findUnique({ where: { id: id.data } });
+  if (!existing) {
+    return res.status(404).json({ error: "Ticket not found" });
+  }
+
+  const now = new Date();
+  const reply = await prisma.ticketReply.create({
+    data: {
+      ticketId: id.data,
+      authorId: req.user.id,
+      // Hardcoded, not read from the request body: every caller here is a
+      // signed-in agent (the auth check above), so the server — not the
+      // client — decides senderType. There's no customer-facing reply path
+      // yet to produce a CUSTOMER-sender row.
+      senderType: ReplySenderType.AGENT,
+      body: parsed.data.body,
+      createdAt: now,
+    },
+    include: { author: { select: { id: true, name: true, email: true } } },
+  });
+  // A reply is activity on the ticket, same as a status/category/assignment
+  // change — keep updatedAt consistent with those.
+  await prisma.ticket.update({ where: { id: id.data }, data: { updatedAt: now } });
+
+  res.status(201).json({ reply });
 });
 
 // Validates a webhook-shaped request body, not a client form — there's no

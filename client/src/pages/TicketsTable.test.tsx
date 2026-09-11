@@ -76,13 +76,13 @@ describe("TicketsTable", () => {
 
     expect(screen.getByText("#2")).toBeInTheDocument();
     expect(screen.getByText("newer@example.com")).toBeInTheDocument();
-    expect(screen.getByText("OPEN")).toBeInTheDocument();
+    expect(screen.getByText("Open")).toBeInTheDocument();
     // No category set on this one — renders the placeholder, not "null".
     expect(rows[1]).toHaveTextContent("—");
 
     expect(screen.getByText("#1")).toBeInTheDocument();
     expect(screen.getByText("older@example.com")).toBeInTheDocument();
-    expect(screen.getByText("RESOLVED")).toBeInTheDocument();
+    expect(screen.getByText("Resolved")).toBeInTheDocument();
     expect(screen.getByText("Refund Request")).toBeInTheDocument();
   });
 

@@ -32,12 +32,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table.tsx";
-import { categoryLabels, statusBadgeVariant, type Ticket } from "@/lib/ticket-display.ts";
+import {
+  categoryLabels,
+  statusBadgeVariant,
+  statusLabels,
+  type Ticket,
+} from "@/lib/ticket-display.ts";
 
 // The list only ever renders these fields — pagination fetches page-sized
 // batches, so `body`/`updatedAt` (only needed on the single-ticket detail
 // page) would just be wasted payload here.
-type TicketListItem = Omit<Ticket, "body" | "updatedAt">;
+type TicketListItem = Omit<Ticket, "body" | "updatedAt" | "replies">;
 
 // A query param, not a real TicketCategory value — "category is null" has
 // to be expressed as *something* in a query string. Mirrors the server's
@@ -88,7 +93,9 @@ const columns: ColumnDef<TicketListItem>[] = [
     accessorKey: "status",
     header: ({ column }) => <SortableHeader label="Status" column={column} />,
     cell: ({ row }) => (
-      <Badge variant={statusBadgeVariant[row.original.status]}>{row.original.status}</Badge>
+      <Badge variant={statusBadgeVariant[row.original.status]}>
+        {statusLabels[row.original.status]}
+      </Badge>
     ),
   },
   {

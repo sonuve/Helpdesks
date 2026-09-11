@@ -20,18 +20,19 @@ enum Role {
 }
 
 model User {
-  id            String    @id
-  name          String
-  email         String
-  emailVerified Boolean
-  image         String?
-  role          Role      @default(AGENT)
-  createdAt     DateTime
-  updatedAt     DateTime
-  deletedAt     DateTime?
-  sessions      Session[]
-  accounts      Account[]
-  assignedTickets Ticket[] @relation("TicketAssignee")
+  id              String        @id
+  name            String
+  email           String
+  emailVerified   Boolean
+  image           String?
+  role            Role          @default(AGENT)
+  createdAt       DateTime
+  updatedAt       DateTime
+  deletedAt       DateTime?
+  sessions        Session[]
+  accounts        Account[]
+  assignedTickets Ticket[]      @relation("TicketAssignee")
+  ticketReplies   TicketReply[] @relation("TicketReplyAuthor")
 
   @@unique([email])
   @@map("user")
@@ -103,6 +104,11 @@ enum TicketCategory {
   REFUND_REQUEST
 }
 
+enum ReplySenderType {
+  AGENT
+  CUSTOMER
+}
+
 // No email-provider fields like a Message-ID: threading strategy is still
 // an open question in project-scope.md, and there's no real provider
 // integration yet — see POST /api/tickets.
@@ -125,6 +131,37 @@ model Ticket {
   assignedTo     User?           @relation("TicketAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
   createdAt      DateTime
   updatedAt      DateTime
+  replies        TicketReply[]
 
   @@map("ticket")
+}
+
+// A reply on a ticket's thread — purely an internal record for now. Actually
+// sending it as an outbound email is implementation-plan.md's Phase 3
+// "Manual reply" task, blocked on the same email-provider decision as
+// ticket ingestion (see project-scope.md's "Email ingestion" open
+// question); this model doesn't assume which provider that ends up being.
+model TicketReply {
+  id         Int             @id @default(autoincrement())
+  ticketId   Int
+  ticket     Ticket          @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  // Always a real User today: the only way to create a reply is the
+  // authenticated POST /api/tickets/:id/replies endpoint, so authorId
+  // always resolves to the agent who wrote it. There's no customer-facing
+  // reply path yet (that's the same blocked email-ingestion question as
+  // above) — senderType exists so the thread UI can already distinguish
+  // a customer reply from an agent one once that path exists, without a
+  // migration at that point.
+  authorId   String
+  author     User            @relation("TicketReplyAuthor", fields: [authorId], references: [id])
+  // Set by the server based on who's authenticated, never taken from the
+  // request body — POST /api/tickets/:id/replies hardcodes AGENT since
+  // every caller there is a signed-in agent. Defaults to AGENT so the
+  // migration adding this column doesn't need to backfill existing rows
+  // with a guess.
+  senderType ReplySenderType @default(AGENT)
+  body       String
+  createdAt  DateTime
+
+  @@map("ticket_reply")
 }
