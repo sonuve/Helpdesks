@@ -15,7 +15,10 @@ import { prisma } from "../lib/prisma.js";
 // here even though a given test file section only exercises one — the
 // mocked module replaces lib/ai.ts's entire export table, so an omitted
 // export would be `undefined` in tickets.ts and crash the *other* routes
-// instead of just not being tested.
+// instead of just not being tested. This is scoped to this file only —
+// server/package.json's test script runs `bun test --isolate`, giving
+// each test file its own module registry, so this mock (and queue.test.ts's
+// separate mock of the same resolved path) can't leak into each other.
 const polishReplyMock = mock(async () => "Mocked polished reply.");
 const generateReplyMock = mock(async () => "Mocked generated reply.");
 const summarizeTicketMock = mock(async () => "Mocked summary.");
@@ -24,6 +27,17 @@ mock.module("../lib/ai.js", () => ({
   generateReply: generateReplyMock,
   summarizeTicket: summarizeTicketMock,
 }));
+
+// POST /api/tickets enqueues classification via lib/queue.ts's
+// enqueueClassifyTicket rather than running it inline — replaced here so
+// this suite never starts a real pg-boss instance (which would need its
+// own schema migration against the test database) just to test the
+// route's request/validation/response-shape logic. The queue's actual job
+// processing (processClassifyTicketJobs) is lib/queue.ts's own concern,
+// covered by queue.test.ts instead — same split as lib/ai.ts's functions
+// being mocked here but tested for real in ai.test.ts.
+const enqueueClassifyTicketMock = mock(async () => {});
+mock.module("../lib/queue.js", () => ({ enqueueClassifyTicket: enqueueClassifyTicketMock }));
 
 // POST /api/tickets (the email-to-ticket ingestion webhook): pure
 // request/validation/response-shape logic with no browser involved, so
@@ -116,6 +130,51 @@ describe("POST /api/tickets", () => {
     createdTicketIds.push(res.body.ticket.id);
     expect(res.body.ticket.subject).toBe("(no subject)");
     expect(res.body.ticket.body).toBe(body);
+  });
+
+  test("enqueues classification for the new ticket without holding up the response", async () => {
+    enqueueClassifyTicketMock.mockClear();
+    const subject = `Server test classification ${Date.now()}`;
+    const body = "I'd like a refund for my last order, please.";
+
+    const res = await request
+      .post("/api/tickets")
+      .set("x-ingest-secret", INGEST_SECRET)
+      .send({ from: "customer@example.com", subject, body });
+
+    expect(res.status).toBe(201);
+    createdTicketIds.push(res.body.ticket.id);
+    // Not classified yet — enqueuing just queues the job, it doesn't run
+    // it. That's the whole point of going through the queue.
+    expect(res.body.ticket.category).toBeNull();
+    expect(enqueueClassifyTicketMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: res.body.ticket.id, subject, body }),
+    );
+  });
+
+  test("still creates the ticket even if enqueuing classification fails", async () => {
+    enqueueClassifyTicketMock.mockImplementationOnce(async () => {
+      throw new Error("could not reach the queue");
+    });
+    const subject = `Server test classification enqueue failure ${Date.now()}`;
+
+    const res = await request
+      .post("/api/tickets")
+      .set("x-ingest-secret", INGEST_SECRET)
+      .send({ from: "customer@example.com", subject, body: "Something is broken." });
+
+    // Unlike polish-reply/generate-reply/summarize, this route doesn't
+    // catch this failure — an enqueue failure means the ticket exists but
+    // will never get classified, which is worth a real 500 rather than a
+    // clean-looking 201 that quietly drops the job. This is a documented
+    // gap, not a design goal: revisit if silent tickets ever become a
+    // real problem in practice.
+    expect(res.status).toBe(500);
+    const created = await prisma.ticket.findFirst({ where: { subject } });
+    if (created) {
+      createdTicketIds.push(created.id);
+    }
+    expect(created?.category ?? null).toBeNull();
   });
 });
 

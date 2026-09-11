@@ -1,5 +1,6 @@
 import { google } from "@ai-sdk/google";
-import { generateText } from "ai";
+import { generateObject, generateText } from "ai";
+import { TicketCategory } from "../generated/prisma/enums.js";
 
 // Gemini 3.5 Flash-Lite: small/fast and covered by Google AI Studio's free
 // tier, unlike tech-stack.md's Anthropic Claude pick for the full
@@ -128,4 +129,38 @@ export async function summarizeTicket({
     prompt: `Ticket subject: ${ticketSubject}\nTicket body: ${ticketBody}\n\nReply thread (oldest first):\n${transcript}`,
   });
   return text.trim();
+}
+
+// Prisma's own TicketCategory (not core's client-safe re-declaration —
+// this file is server-only, see CLAUDE.md's "Core enums" section), so
+// adding a category here can never drift from what the DB column actually
+// accepts.
+const CATEGORY_VALUES = Object.values(TicketCategory) as [TicketCategory, ...TicketCategory[]];
+
+// generateObject's "enum" output mode, rather than generateText + parsing —
+// the model is constrained to return one of exactly these three strings,
+// no free text to validate or coerce. There's no "Other"/unclassified
+// option, matching TicketCategory itself (project-scope.md's "Categories"
+// decision is exactly these three, exhaustively) — the model always has to
+// pick its single best fit rather than punt.
+export async function classifyTicket({
+  ticketSubject,
+  ticketBody,
+}: {
+  ticketSubject: string;
+  ticketBody: string;
+}): Promise<TicketCategory> {
+  const { object } = await generateObject({
+    model,
+    output: "enum",
+    enum: CATEGORY_VALUES,
+    system:
+      "Classify this customer support ticket into exactly one category, based on its subject and body:\n" +
+      "- GENERAL_QUESTION: a general question that isn't a technical problem or a refund request.\n" +
+      "- TECHNICAL_QUESTION: a bug, error, or something not working as expected.\n" +
+      "- REFUND_REQUEST: the customer is asking for a refund, credit, or their money back.\n" +
+      "Pick the single best-fitting category, even if the ticket could arguably fit more than one.",
+    prompt: `Ticket subject: ${ticketSubject}\nTicket body: ${ticketBody}`,
+  });
+  return object;
 }

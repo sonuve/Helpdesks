@@ -10,7 +10,12 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 const generateTextMock = mock(async (_options: { system: string; prompt: string }) => ({
   text: "  Raw AI output.  ",
 }));
-mock.module("ai", () => ({ generateText: generateTextMock }));
+const generateObjectMock = mock(
+  async (_options: { system: string; prompt: string; enum: string[] }) => ({
+    object: "GENERAL_QUESTION",
+  }),
+);
+mock.module("ai", () => ({ generateText: generateTextMock, generateObject: generateObjectMock }));
 // ai.ts's `google("gemini-3.5-flash-lite")` call at module load time
 // doesn't need a real GOOGLE_GENERATIVE_AI_API_KEY (server/.env.test
 // deliberately has none — see its comment) as long as generateText itself
@@ -18,10 +23,11 @@ mock.module("ai", () => ({ generateText: generateTextMock }));
 // isolation from @ai-sdk/google's own behavior.
 mock.module("@ai-sdk/google", () => ({ google: () => "mocked-model" }));
 
-const { generateReply, polishReply, summarizeTicket } = await import("./ai.js");
+const { classifyTicket, generateReply, polishReply, summarizeTicket } = await import("./ai.js");
 
 beforeEach(() => {
   generateTextMock.mockClear();
+  generateObjectMock.mockClear();
 });
 
 describe("polishReply", () => {
@@ -147,5 +153,35 @@ describe("summarizeTicket", () => {
 
     const [{ system }] = generateTextMock.mock.calls[0]!;
     expect(system).toContain("not a message to the customer");
+  });
+});
+
+describe("classifyTicket", () => {
+  test("returns the model's chosen category", async () => {
+    generateObjectMock.mockResolvedValueOnce({ object: "REFUND_REQUEST" });
+
+    const result = await classifyTicket({ ticketSubject: "Subject", ticketBody: "Body" });
+
+    expect(result).toBe("REFUND_REQUEST");
+  });
+
+  test("constrains the model to exactly the three TicketCategory values", async () => {
+    await classifyTicket({ ticketSubject: "Subject", ticketBody: "Body" });
+
+    const [{ enum: categoryEnum }] = generateObjectMock.mock.calls[0]!;
+    expect(categoryEnum.sort()).toEqual(
+      ["GENERAL_QUESTION", "REFUND_REQUEST", "TECHNICAL_QUESTION"].sort(),
+    );
+  });
+
+  test("includes the ticket subject and body in the prompt", async () => {
+    await classifyTicket({
+      ticketSubject: "Can't upload files",
+      ticketBody: "My upload keeps failing.",
+    });
+
+    const [{ prompt }] = generateObjectMock.mock.calls[0]!;
+    expect(prompt).toContain("Can't upload files");
+    expect(prompt).toContain("My upload keeps failing.");
   });
 });

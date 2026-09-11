@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createReplySchema, polishReplySchema } from "core";
 import { generateReply, polishReply, summarizeTicket } from "../lib/ai.js";
 import { prisma } from "../lib/prisma.js";
+import { enqueueClassifyTicket } from "../lib/queue.js";
 import { apiLimiter } from "../middleware/rate-limit.js";
 import type { Prisma } from "../generated/prisma/client.js";
 // Prisma's own generated TicketStatus/TicketCategory, not core's
@@ -480,6 +481,17 @@ ticketsRouter.post("/api/tickets", apiLimiter, async (req: Request, res: Respons
       updatedAt: now,
     },
   });
+
+  // Enqueues classification rather than running it inline — this awaits a
+  // fast pg-boss insert, not the AI call itself (see lib/queue.ts), so the
+  // webhook still responds without waiting on Gemini, matching
+  // tech-stack.md's rationale for keeping ingestion handlers fast (the
+  // full system does this via a BullMQ job; pg-boss is the same
+  // non-blocking, durable outcome on the Postgres this codebase already
+  // has, no Redis needed — see CLAUDE.md's "Ticket classification"). The
+  // response's `ticket.category` is still `null`; callers reading the
+  // category back need a subsequent GET once the queued job completes.
+  await enqueueClassifyTicket(ticket);
 
   res.status(201).json({ ticket });
 });
