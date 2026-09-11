@@ -4,12 +4,13 @@ import { TicketCategory, TicketStatus } from "core";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderWithQuery } from "@/test/render-with-query.tsx";
+import type { Ticket } from "@/lib/ticket-display.ts";
 import { TicketDetailPage } from "./TicketDetailPage.tsx";
 
 vi.mock("axios");
 const mockedAxios = vi.mocked(axios, true);
 
-const TICKET = {
+const TICKET: Ticket = {
   id: 5,
   status: TicketStatus.OPEN,
   category: TicketCategory.REFUND_REQUEST,
@@ -125,6 +126,7 @@ describe("TicketDetailPage", () => {
     expect(await screen.findByRole("option", { name: "Agent" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Admin" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Unassigned" })).toBeInTheDocument();
+    expect(mockedAxios.get).toHaveBeenCalledWith("/api/users/assignable");
   });
 
   it("shows the current assignee's name when one is set", async () => {
@@ -172,6 +174,34 @@ describe("TicketDetailPage", () => {
       expect(mockedAxios.patch).toHaveBeenCalledWith(`/api/tickets/${TICKET.id}/assign`, {
         assignedToId: null,
       }),
+    );
+  });
+
+  it("shows the new assignee once the mutation succeeds and the ticket query refetches", async () => {
+    // A mutable "server" for the GET mock to read from, so the refetch that
+    // onSuccess's invalidateQueries triggers returns the post-assignment
+    // ticket — proving the picker updates from the actual cache
+    // invalidation, not just that PATCH was called with the right body.
+    let currentTicket: typeof TICKET = TICKET;
+    mockedAxios.get.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/tickets/")) return { data: { ticket: currentTicket } };
+      if (url === "/api/users/assignable") return { data: { users: ASSIGNABLE_USERS } };
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    mockedAxios.patch.mockImplementation(async () => {
+      currentTicket = { ...TICKET, assignedTo: ASSIGNABLE_USERS[0] };
+      return { data: { ticket: currentTicket } };
+    });
+
+    renderDetailPage(TICKET.id);
+    await screen.findByText(/Refund request/);
+    expect(screen.getByRole("combobox", { name: "Assigned to" })).toHaveTextContent("Unassigned");
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Assigned to" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Agent" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Assigned to" })).toHaveTextContent("Agent"),
     );
   });
 });

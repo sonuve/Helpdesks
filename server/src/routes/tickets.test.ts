@@ -594,6 +594,16 @@ describe("a single-ticket-scoped session (GET /:id, PATCH /:id/assign)", () => {
       });
     });
 
+    test("the assignment is reflected in GET /api/tickets' list response too, not just the detail response", async () => {
+      await agent.patch(`/api/tickets/${ticketId}/assign`).send({ assignedToId: assigneeId });
+
+      const res = await agent.get("/api/tickets?pageSize=100");
+      const ours = (res.body.tickets as { id: number; assignedTo: unknown }[]).find(
+        (t) => t.id === ticketId,
+      );
+      expect(ours?.assignedTo).toMatchObject({ id: assigneeId, name: "Server Test Assignee" });
+    });
+
     test("unassigns when assignedToId is null", async () => {
       await agent.patch(`/api/tickets/${ticketId}/assign`).send({ assignedToId: assigneeId });
 
