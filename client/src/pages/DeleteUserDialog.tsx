@@ -11,6 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog.tsx";
+import { FormError } from "@/components/FormError.tsx";
 import { getErrorMessage } from "@/lib/api-error.ts";
 
 type DeleteUserDialogProps = {
@@ -70,11 +71,7 @@ function DeleteUserDialogBody({
           kept, just hidden.
         </AlertDialogDescription>
       </AlertDialogHeader>
-      {error && (
-        <p role="alert" className="text-sm font-normal text-destructive">
-          {error}
-        </p>
-      )}
+      <FormError message={error} />
       <AlertDialogFooter>
         <AlertDialogCancel>Cancel</AlertDialogCancel>
         <AlertDialogAction

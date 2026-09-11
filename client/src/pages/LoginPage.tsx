@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button.tsx";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card.tsx";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field.tsx";
 import { Input } from "@/components/ui/input.tsx";
+import { FormError } from "@/components/FormError.tsx";
 import { authClient } from "../lib/auth-client.ts";
 
 const loginSchema = z.object({
@@ -49,11 +50,7 @@ export function LoginPage() {
           <CardContent>
             <form onSubmit={handleSubmit(onSubmit)}>
               <FieldGroup>
-                {error && (
-                  <p role="alert" className="text-sm font-normal text-destructive">
-                    {error}
-                  </p>
-                )}
+                <FormError message={error} />
                 <Field data-invalid={!!errors.email}>
                   <FieldLabel htmlFor="email">Email</FieldLabel>
                   <Input

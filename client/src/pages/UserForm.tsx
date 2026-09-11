@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select.tsx";
+import { FormError } from "@/components/FormError.tsx";
 import { getErrorMessage } from "@/lib/api-error.ts";
 
 // `updateUserSchema` (blank-password-allowed) infers to the same shape as
@@ -74,11 +75,7 @@ export function UserForm(props: UserFormProps) {
   return (
     <form onSubmit={handleSubmit(onSubmit)} autoComplete="off">
       <FieldGroup>
-        {error && (
-          <p role="alert" className="text-sm font-normal text-destructive">
-            {error}
-          </p>
-        )}
+        <FormError message={error} />
         <Field data-invalid={!!errors.name}>
           <FieldLabel htmlFor="name">Name</FieldLabel>
           {/* autoComplete="off" — a value of "name" here is exactly the

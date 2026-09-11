@@ -79,6 +79,8 @@ Only reach for `try/catch` when you need to turn a specific failure into a speci
 
 On the client, every mutation's `onError` needs to pull that server-provided `{ error: string }` message out of a failed request, falling back to a generic message for anything else (a network failure, an unexpected response shape). Use `getErrorMessage(error, fallback)` from `client/src/lib/api-error.ts` for this rather than inlining `axios.isAxiosError(error) && error.response?.data?.error` again — see its usage in `UserForm.tsx`, `DeleteUserDialog.tsx`, and `TicketDetailPage.tsx`'s reply form.
 
+Render that message with `<FormError message={error} />` (`client/src/components/FormError.tsx`) rather than the `{error && <p role="alert" className="text-sm font-normal text-destructive">{error}</p>}` block inline — it renders nothing for a `null`/empty message, so callers don't need their own `{error && ...}` guard. This is the whole-form/whole-mutation counterpart to `FieldError` (`components/ui/field.tsx`), which renders one field's react-hook-form validation errors instead. `LoginPage.tsx`, `UserForm.tsx`, `DeleteUserDialog.tsx`, and `TicketDetailPage.tsx`'s reply form all use it.
+
 ### Rate limiting
 
 Two layers, both IP-keyed:

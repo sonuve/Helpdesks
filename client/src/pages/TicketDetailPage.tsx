@@ -20,6 +20,7 @@ import {
 import { Separator } from "@/components/ui/separator.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
+import { FormError } from "@/components/FormError.tsx";
 import { getErrorMessage } from "@/lib/api-error.ts";
 import {
   replySenderTypeBadgeVariant,
@@ -183,11 +184,7 @@ export function TicketDetailPage() {
               </div>
 
               <form onSubmit={handleReplySubmit(onSubmitReply)} className="flex flex-col gap-2">
-                {replyError && (
-                  <p role="alert" className="text-sm font-normal text-destructive">
-                    {replyError}
-                  </p>
-                )}
+                <FormError message={replyError} />
                 <Field data-invalid={!!replyErrors.body}>
                   <Textarea
                     aria-label="Reply"
