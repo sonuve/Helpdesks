@@ -122,6 +122,12 @@ model Ticket {
   subject        String
   body           String
   requesterEmail String
+  // Nullable: the email ingestion webhook (POST /api/tickets) may or may not
+  // resolve a display name for the sender, and tickets created before this
+  // field existed have none. Used to address the customer by first name in
+  // AI-drafted/polished replies (lib/ai.ts) — falls back to a generic
+  // greeting when null rather than guessing a name from the email address.
+  requesterName  String?
   // Nullable, no default: unassigned until a human (or, later, routing
   // logic) claims it. onDelete: SetNull rather than Cascade/Restrict — an
   // assignee going away shouldn't delete or block deleting the ticket, and

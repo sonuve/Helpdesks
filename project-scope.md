@@ -32,6 +32,7 @@ Build a ticket management system that uses AI to automatically classify, respond
 - **Agent permissions:** Regular agents (not just admins) have full ticket control — claim, reassign, edit AI replies, close/reopen, override AI classification.
 - **User provisioning:** The system is deployed with a single seeded admin account. The admin then creates additional agent accounts — there is no public/self-service signup.
 - **Migration:** This replaces an existing helpdesk tool. Historical tickets need to be migrated — this also solves the knowledge-base cold-start problem, since the KB depends on past resolved tickets existing at launch.
+- **Requester display name:** `Ticket` captures an optional `requesterName` on ingestion (a display name isn't always resolvable from an email provider), shown alongside the requester's email in the UI and used to address the customer by first name only in AI-drafted/polished replies — falls back to a generic greeting when absent, never inventing a name. This was added ahead of, and separately from, the "AI autonomy" system above: it's a human-in-the-loop reply-drafting/polishing assist an agent triggers and reviews before sending, not the autonomous classify-draft-send pipeline (see CLAUDE.md's "Reply drafting and polishing").
 
 ## Tech Stack
 

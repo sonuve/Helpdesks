@@ -4,7 +4,7 @@
 - **Backend:** Node.js + TypeScript (Fastify) — one language across the stack.
 - **Database:** PostgreSQL with the `pgvector` extension — relational data (tickets, users, statuses, categories) and KB embeddings in one database.
 - **Background jobs:** Redis + BullMQ — async email ingestion, AI classification/reply generation, and sending, so webhook handlers stay fast and retries are easy.
-- **AI:** Anthropic Claude API for classification, summaries, and reply drafting. Voyage AI embeddings for KB search over past resolved tickets.
+- **AI:** Anthropic Claude API for classification, summaries, and reply drafting. Voyage AI embeddings for KB search over past resolved tickets. (This is the target for the full autonomous system described above — the one AI feature actually shipped so far, the ticket detail page's "Polish" button on an agent's draft reply, predates this system and deliberately uses a different, free-tier provider instead; see CLAUDE.md's "Reply polishing" section.)
 - **Email:** Gmail API or Microsoft Graph (whichever mailbox is used), via push/webhook notifications for both receiving and sending.
 - **Auth:** Database-backed sessions — session records stored in Postgres (e.g. a `sessions` table, via `connect-pg-simple` or equivalent), not JWT. A `role` column (admin/agent) on the user table drives permissions. No self-service signup, matching the admin-provisioning decision in `project-scope.md`.
 - **Audit log:** A dedicated `ai_actions` table recording every AI decision (classification, confidence score, draft text, sent/escalated).

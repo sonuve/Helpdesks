@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { createReplySchema } from "core";
+import { createReplySchema, polishReplySchema } from "core";
+import { generateReply, polishReply, summarizeTicket } from "../lib/ai.js";
 import { prisma } from "../lib/prisma.js";
 import { apiLimiter } from "../middleware/rate-limit.js";
 import type { Prisma } from "../generated/prisma/client.js";
@@ -297,11 +298,153 @@ ticketsRouter.post("/api/tickets/:id/replies", apiLimiter, async (req: Request, 
   res.status(201).json({ reply });
 });
 
+// Improves an agent's in-progress draft before they send it — distinct
+// from POST /api/tickets/:id/replies, which actually creates the
+// TicketReply. Nothing is persisted here; the client swaps the polished
+// text into its own form state and the agent still has to hit "Send
+// reply" themselves. Same req.user-only access rule as every other ticket
+// endpoint.
+ticketsRouter.post(
+  "/api/tickets/:id/polish-reply",
+  apiLimiter,
+  async (req: Request, res: Response) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const id = z.coerce.number().int().positive().safeParse(req.params.id);
+    if (!id.success) {
+      return res.status(400).json({ error: "Invalid ticket id" });
+    }
+
+    const parsed = polishReplySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input" });
+    }
+
+    const ticket = await prisma.ticket.findUnique({ where: { id: id.data } });
+    if (!ticket) {
+      return res.status(404).json({ error: "Ticket not found" });
+    }
+
+    // Unlike the rest of this file, a failure here is an external AI
+    // provider being unreachable/erroring/misconfigured, not a Prisma/zod
+    // error — that's worth a specific response (same reasoning as
+    // GET /api/health's try/catch) rather than the default 500 from
+    // letting it propagate.
+    try {
+      const polished = await polishReply({
+        ticketSubject: ticket.subject,
+        ticketBody: ticket.body,
+        customerName: ticket.requesterName,
+        draft: parsed.data.body,
+        agentName: req.user.name,
+      });
+      res.json({ body: polished });
+    } catch (error) {
+      console.error("[polish-reply] AI request failed:", error);
+      res.status(502).json({ error: "Could not polish this reply. Please try again." });
+    }
+  },
+);
+
+// Drafts a reply from scratch, grounded in the ticket itself rather than an
+// agent's in-progress text — for when there's no draft yet to polish. Same
+// "nothing persisted, req.user-only" shape as polish-reply above; no
+// request body to validate since the ticket's own subject/body is the only
+// input.
+ticketsRouter.post(
+  "/api/tickets/:id/generate-reply",
+  apiLimiter,
+  async (req: Request, res: Response) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const id = z.coerce.number().int().positive().safeParse(req.params.id);
+    if (!id.success) {
+      return res.status(400).json({ error: "Invalid ticket id" });
+    }
+
+    const ticket = await prisma.ticket.findUnique({ where: { id: id.data } });
+    if (!ticket) {
+      return res.status(404).json({ error: "Ticket not found" });
+    }
+
+    try {
+      const generated = await generateReply({
+        ticketSubject: ticket.subject,
+        ticketBody: ticket.body,
+        customerName: ticket.requesterName,
+        agentName: req.user.name,
+      });
+      res.json({ body: generated });
+    } catch (error) {
+      console.error("[generate-reply] AI request failed:", error);
+      res.status(502).json({ error: "Could not generate a reply. Please try again." });
+    }
+  },
+);
+
+// An agent-facing "catch me up" summary of the ticket and its reply thread
+// so far — not persisted anywhere (see lib/ai.ts's summarizeTicket), so the
+// client is expected to call this again whenever it wants a current one
+// rather than relying on a cached result. Same req.user-only, no-request-
+// body shape as generate-reply above.
+ticketsRouter.post(
+  "/api/tickets/:id/summarize",
+  apiLimiter,
+  async (req: Request, res: Response) => {
+    if (!req.user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const id = z.coerce.number().int().positive().safeParse(req.params.id);
+    if (!id.success) {
+      return res.status(400).json({ error: "Invalid ticket id" });
+    }
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: id.data },
+      include: {
+        replies: {
+          include: { author: { select: { name: true } } },
+          orderBy: { createdAt: "asc" },
+        },
+      },
+    });
+    if (!ticket) {
+      return res.status(404).json({ error: "Ticket not found" });
+    }
+
+    try {
+      const summary = await summarizeTicket({
+        ticketSubject: ticket.subject,
+        ticketBody: ticket.body,
+        replies: ticket.replies.map((reply) => ({
+          senderType: reply.senderType,
+          authorName: reply.author.name,
+          body: reply.body,
+        })),
+      });
+      res.json({ summary });
+    } catch (error) {
+      console.error("[summarize] AI request failed:", error);
+      res.status(502).json({ error: "Could not summarize this ticket. Please try again." });
+    }
+  },
+);
+
 // Validates a webhook-shaped request body, not a client form — there's no
 // UI behind this endpoint, so per CLAUDE.md's data-validation convention
 // this stays local here rather than moving to `core`.
 const receiveEmailSchema = z.object({
   from: z.string().email("A valid sender email is required"),
+  // Optional: not every email provider surfaces a display name alongside
+  // the address, and this is a display-only nicety (see
+  // Ticket.requesterName in schema.prisma) — never required to accept the
+  // ticket.
+  requesterName: z.string().trim().min(1).optional(),
   subject: z.string().trim().default("(no subject)"),
   body: z.string(),
 });
@@ -332,6 +475,7 @@ ticketsRouter.post("/api/tickets", apiLimiter, async (req: Request, res: Respons
       subject: parsed.data.subject,
       body: parsed.data.body,
       requesterEmail: parsed.data.from.toLowerCase(),
+      requesterName: parsed.data.requesterName ?? null,
       createdAt: now,
       updatedAt: now,
     },

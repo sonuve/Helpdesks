@@ -11,6 +11,7 @@ import { ReplyForm } from "./ReplyForm.tsx";
 import { ReplyThread } from "./ReplyThread.tsx";
 import { TicketDetails } from "./TicketDetails.tsx";
 import { TicketDetailsSkeleton } from "./TicketDetailsSkeleton.tsx";
+import { TicketSummary } from "./TicketSummary.tsx";
 import { UpdateTicket } from "./UpdateTicket.tsx";
 
 export function TicketDetailPage() {
@@ -60,6 +61,8 @@ export function TicketDetailPage() {
           <CardContent className="grid gap-6 md:grid-cols-[2fr_1fr]">
             <div className="flex flex-col gap-4">
               <TicketDetails ticket={data} />
+
+              <TicketSummary ticket={data} />
 
               <Separator />
 

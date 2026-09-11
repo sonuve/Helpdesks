@@ -16,6 +16,7 @@ const TICKET: Ticket = {
   subject: "Refund request",
   body: "I would like a refund for my last order.",
   requesterEmail: "customer@example.com",
+  requesterName: null,
   assignedTo: null,
   replies: [],
   createdAt: "2026-02-20T00:00:00.000Z",

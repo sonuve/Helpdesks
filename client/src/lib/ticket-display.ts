@@ -22,6 +22,7 @@ export type Ticket = {
   subject: string;
   body: string;
   requesterEmail: string;
+  requesterName: string | null;
   assignedTo: TicketAssignee | null;
   // Only populated on the single-ticket detail response
   // (GET /api/tickets/:id) — same reasoning as `body`, a paginated list

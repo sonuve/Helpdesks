@@ -1,9 +1,29 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { hashPassword } from "better-auth/crypto";
 import { Role } from "core";
 import supertest from "supertest";
 import { app } from "../app.js";
 import { prisma } from "../lib/prisma.js";
+
+// POST /api/tickets/:id/polish-reply, .../generate-reply, and
+// .../summarize all call out to a real AI provider via lib/ai.ts —
+// replaced here so this suite never makes a real network call (or needs a
+// real API key) just to test these routes' request/validation/response-
+// shape logic. Bun's mock.module retroactively replaces the module for
+// consumers that already imported it (tickets.ts, pulled in transitively
+// via `app` above), not just future imports. Every export must be present
+// here even though a given test file section only exercises one — the
+// mocked module replaces lib/ai.ts's entire export table, so an omitted
+// export would be `undefined` in tickets.ts and crash the *other* routes
+// instead of just not being tested.
+const polishReplyMock = mock(async () => "Mocked polished reply.");
+const generateReplyMock = mock(async () => "Mocked generated reply.");
+const summarizeTicketMock = mock(async () => "Mocked summary.");
+mock.module("../lib/ai.js", () => ({
+  polishReply: polishReplyMock,
+  generateReply: generateReplyMock,
+  summarizeTicket: summarizeTicketMock,
+}));
 
 // POST /api/tickets (the email-to-ticket ingestion webhook): pure
 // request/validation/response-shape logic with no browser involved, so
@@ -837,6 +857,195 @@ describe("a single-ticket-scoped session (GET /:id, PATCH /:id/assign)", () => {
         "Spoofed sender attempt",
         "Second reply",
       ]);
+    });
+  });
+
+  describe("POST /api/tickets/:id/polish-reply", () => {
+    test("401s when unauthenticated", async () => {
+      const res = await request
+        .post(`/api/tickets/${ticketId}/polish-reply`)
+        .send({ body: "Draft" });
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ error: "Unauthorized" });
+    });
+
+    test("returns the polished body from the AI provider, without persisting anything", async () => {
+      polishReplyMock.mockClear();
+      const res = await agent
+        .post(`/api/tickets/${ticketId}/polish-reply`)
+        .send({ body: "thx for reachin out we will fix it" });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ body: "Mocked polished reply." });
+      expect(polishReplyMock).toHaveBeenCalledTimes(1);
+      expect(polishReplyMock).toHaveBeenCalledWith({
+        ticketSubject: "Detail fixture",
+        ticketBody: "Full ticket body for the detail page.",
+        customerName: null,
+        draft: "thx for reachin out we will fix it",
+        agentName: "Server Test Detail Agent",
+      });
+
+      // Confirms this route is read-only: no reply was actually created.
+      const ticketRes = await agent.get(`/api/tickets/${ticketId}`);
+      expect(
+        (ticketRes.body.ticket.replies as { body: string }[]).some(
+          (r) => r.body === "Mocked polished reply.",
+        ),
+      ).toBe(false);
+    });
+
+    test("400s for a blank body", async () => {
+      const res = await agent.post(`/api/tickets/${ticketId}/polish-reply`).send({ body: "   " });
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ error: "Reply cannot be empty" });
+    });
+
+    test("404s when the ticket doesn't exist", async () => {
+      const res = await agent
+        .post("/api/tickets/999999999/polish-reply")
+        .send({ body: "Draft" });
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "Ticket not found" });
+    });
+
+    test("400s for a non-numeric ticket id", async () => {
+      const res = await agent
+        .post("/api/tickets/not-a-number/polish-reply")
+        .send({ body: "Draft" });
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ error: "Invalid ticket id" });
+    });
+
+    test("502s with a clean message when the AI provider call fails", async () => {
+      polishReplyMock.mockImplementationOnce(async () => {
+        throw new Error("upstream timeout");
+      });
+
+      const res = await agent
+        .post(`/api/tickets/${ticketId}/polish-reply`)
+        .send({ body: "Draft" });
+
+      expect(res.status).toBe(502);
+      expect(res.body).toEqual({ error: "Could not polish this reply. Please try again." });
+    });
+  });
+
+  describe("POST /api/tickets/:id/generate-reply", () => {
+    test("401s when unauthenticated", async () => {
+      const res = await request.post(`/api/tickets/${ticketId}/generate-reply`);
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ error: "Unauthorized" });
+    });
+
+    test("returns a reply generated from the ticket's own subject/body, without persisting anything", async () => {
+      generateReplyMock.mockClear();
+      const res = await agent.post(`/api/tickets/${ticketId}/generate-reply`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ body: "Mocked generated reply." });
+      expect(generateReplyMock).toHaveBeenCalledTimes(1);
+      expect(generateReplyMock).toHaveBeenCalledWith({
+        ticketSubject: "Detail fixture",
+        ticketBody: "Full ticket body for the detail page.",
+        customerName: null,
+        agentName: "Server Test Detail Agent",
+      });
+
+      // Confirms this route is read-only, same as polish-reply.
+      const ticketRes = await agent.get(`/api/tickets/${ticketId}`);
+      expect(
+        (ticketRes.body.ticket.replies as { body: string }[]).some(
+          (r) => r.body === "Mocked generated reply.",
+        ),
+      ).toBe(false);
+    });
+
+    test("404s when the ticket doesn't exist", async () => {
+      const res = await agent.post("/api/tickets/999999999/generate-reply");
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "Ticket not found" });
+    });
+
+    test("400s for a non-numeric ticket id", async () => {
+      const res = await agent.post("/api/tickets/not-a-number/generate-reply");
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ error: "Invalid ticket id" });
+    });
+
+    test("502s with a clean message when the AI provider call fails", async () => {
+      generateReplyMock.mockImplementationOnce(async () => {
+        throw new Error("upstream timeout");
+      });
+
+      const res = await agent.post(`/api/tickets/${ticketId}/generate-reply`);
+
+      expect(res.status).toBe(502);
+      expect(res.body).toEqual({ error: "Could not generate a reply. Please try again." });
+    });
+  });
+
+  describe("POST /api/tickets/:id/summarize", () => {
+    test("401s when unauthenticated", async () => {
+      const res = await request.post(`/api/tickets/${ticketId}/summarize`);
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ error: "Unauthorized" });
+    });
+
+    test("summarizes the ticket and its reply thread so far", async () => {
+      summarizeTicketMock.mockClear();
+      const res = await agent.post(`/api/tickets/${ticketId}/summarize`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ summary: "Mocked summary." });
+      expect(summarizeTicketMock).toHaveBeenCalledTimes(1);
+      // The "POST /api/tickets/:id/replies" describe above already left
+      // three real replies on this same ticketId — this confirms the
+      // route pulls the actual current thread rather than an empty one.
+      expect(summarizeTicketMock).toHaveBeenCalledWith({
+        ticketSubject: "Detail fixture",
+        ticketBody: "Full ticket body for the detail page.",
+        replies: [
+          {
+            senderType: "AGENT",
+            authorName: "Server Test Detail Agent",
+            body: "Thanks for reaching out.",
+          },
+          {
+            senderType: "AGENT",
+            authorName: "Server Test Detail Agent",
+            body: "Spoofed sender attempt",
+          },
+          {
+            senderType: "AGENT",
+            authorName: "Server Test Detail Agent",
+            body: "Second reply",
+          },
+        ],
+      });
+    });
+
+    test("404s when the ticket doesn't exist", async () => {
+      const res = await agent.post("/api/tickets/999999999/summarize");
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "Ticket not found" });
+    });
+
+    test("400s for a non-numeric ticket id", async () => {
+      const res = await agent.post("/api/tickets/not-a-number/summarize");
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ error: "Invalid ticket id" });
+    });
+
+    test("502s with a clean message when the AI provider call fails", async () => {
+      summarizeTicketMock.mockImplementationOnce(async () => {
+        throw new Error("upstream timeout");
+      });
+
+      const res = await agent.post(`/api/tickets/${ticketId}/summarize`);
+
+      expect(res.status).toBe(502);
+      expect(res.body).toEqual({ error: "Could not summarize this ticket. Please try again." });
     });
   });
 });

@@ -10,7 +10,9 @@
     "test": "bun --env-file=.env.test test"
   },
   "dependencies": {
+    "@ai-sdk/google": "^4.0.67",
     "@prisma/client": "6.19.3",
+    "ai": "^7.0.97",
     "better-auth": "^1.7.3",
     "core": "workspace:*",
     "cors": "^2.8.5",

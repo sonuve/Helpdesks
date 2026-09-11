@@ -11,6 +11,7 @@ const TICKET: Ticket = {
   subject: "Refund request",
   body: "I would like a refund for my last order.",
   requesterEmail: "customer@example.com",
+  requesterName: null,
   assignedTo: null,
   replies: [],
   createdAt: "2026-02-20T00:00:00.000Z",
@@ -27,6 +28,18 @@ describe("TicketDetails", () => {
       screen.getByText(`Created ${new Date(TICKET.createdAt).toLocaleString()}`),
     ).toBeInTheDocument();
     expect(screen.getByText("I would like a refund for my last order.")).toBeInTheDocument();
+  });
+
+  it("shows the requester's name alongside their email when one is on file", () => {
+    render(<TicketDetails ticket={{ ...TICKET, requesterName: "Isabella Moreau" }} />);
+
+    expect(screen.getByText("Isabella Moreau <customer@example.com>")).toBeInTheDocument();
+  });
+
+  it("falls back to just the email when there's no requester name", () => {
+    render(<TicketDetails ticket={TICKET} />);
+
+    expect(screen.getByText("customer@example.com")).toBeInTheDocument();
   });
 
   it("does not render anything about replies", () => {

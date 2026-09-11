@@ -11,7 +11,11 @@ export function TicketDetails({ ticket }: { ticket: Ticket }) {
         #{ticket.id} {ticket.subject}
       </CardTitle>
       <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-        <span>{ticket.requesterEmail}</span>
+        <span>
+          {ticket.requesterName
+            ? `${ticket.requesterName} <${ticket.requesterEmail}>`
+            : ticket.requesterEmail}
+        </span>
         <span>Created {new Date(ticket.createdAt).toLocaleString()}</span>
       </div>
       <p className="whitespace-pre-wrap text-foreground">{ticket.body}</p>
