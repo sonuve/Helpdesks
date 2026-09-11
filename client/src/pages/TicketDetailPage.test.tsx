@@ -76,8 +76,10 @@ describe("TicketDetailPage", () => {
     renderDetailPage(TICKET.id);
 
     expect(await screen.findByText(/Refund request/)).toBeInTheDocument();
-    expect(screen.getByText("OPEN")).toBeInTheDocument();
-    expect(screen.getByText("Refund Request")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Status" })).toHaveTextContent("Open");
+    expect(screen.getByRole("combobox", { name: "Category" })).toHaveTextContent(
+      "Refund Request",
+    );
     expect(screen.getByText("customer@example.com")).toBeInTheDocument();
     expect(
       screen.getByText("I would like a refund for my last order."),
@@ -89,7 +91,9 @@ describe("TicketDetailPage", () => {
 
     renderDetailPage(TICKET.id);
 
-    expect(await screen.findByText("Unclassified")).toBeInTheDocument();
+    expect(await screen.findByRole("combobox", { name: "Category" })).toHaveTextContent(
+      "Unclassified",
+    );
   });
 
   it("shows an error message when the request fails", async () => {
@@ -202,6 +206,95 @@ describe("TicketDetailPage", () => {
 
     await waitFor(() =>
       expect(screen.getByRole("combobox", { name: "Assigned to" })).toHaveTextContent("Agent"),
+    );
+  });
+
+  it("lists all three statuses as options", async () => {
+    mockGet();
+
+    renderDetailPage(TICKET.id);
+    await screen.findByText(/Refund request/);
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Status" }));
+    expect(await screen.findByRole("option", { name: "Open" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Resolved" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Closed" })).toBeInTheDocument();
+  });
+
+  it("updates the status when a new one is picked", async () => {
+    mockGet();
+    mockedAxios.patch.mockResolvedValue({ data: { ticket: { ...TICKET, status: "RESOLVED" } } });
+
+    renderDetailPage(TICKET.id);
+    await screen.findByText(/Refund request/);
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Status" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Resolved" }));
+
+    await waitFor(() =>
+      expect(mockedAxios.patch).toHaveBeenCalledWith(`/api/tickets/${TICKET.id}`, {
+        status: "RESOLVED",
+      }),
+    );
+  });
+
+  it("updates the category when a new one is picked", async () => {
+    mockGet();
+    mockedAxios.patch.mockResolvedValue({
+      data: { ticket: { ...TICKET, category: "GENERAL_QUESTION" } },
+    });
+
+    renderDetailPage(TICKET.id);
+    await screen.findByText(/Refund request/);
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Category" }));
+    fireEvent.click(await screen.findByRole("option", { name: "General Question" }));
+
+    await waitFor(() =>
+      expect(mockedAxios.patch).toHaveBeenCalledWith(`/api/tickets/${TICKET.id}`, {
+        category: "GENERAL_QUESTION",
+      }),
+    );
+  });
+
+  it("clears the category (sends null) when 'Unclassified' is picked", async () => {
+    mockGet();
+    mockedAxios.patch.mockResolvedValue({ data: { ticket: { ...TICKET, category: null } } });
+
+    renderDetailPage(TICKET.id);
+    await screen.findByText(/Refund request/);
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Category" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Unclassified" }));
+
+    await waitFor(() =>
+      expect(mockedAxios.patch).toHaveBeenCalledWith(`/api/tickets/${TICKET.id}`, {
+        category: null,
+      }),
+    );
+  });
+
+  it("shows the new status once the mutation succeeds and the ticket query refetches", async () => {
+    let currentTicket: typeof TICKET = TICKET;
+    mockedAxios.get.mockImplementation(async (url: string) => {
+      if (url.startsWith("/api/tickets/")) return { data: { ticket: currentTicket } };
+      if (url === "/api/users/assignable") return { data: { users: ASSIGNABLE_USERS } };
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    mockedAxios.patch.mockImplementation(async () => {
+      currentTicket = { ...TICKET, status: "CLOSED" };
+      return { data: { ticket: currentTicket } };
+    });
+
+    renderDetailPage(TICKET.id);
+    await screen.findByText(/Refund request/);
+    expect(screen.getByRole("combobox", { name: "Status" })).toHaveTextContent("Open");
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Status" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Closed" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Status" })).toHaveTextContent("Closed"),
     );
   });
 });

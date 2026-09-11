@@ -1,8 +1,8 @@
 import axios from "axios";
+import { TicketCategory, TicketStatus } from "core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeftIcon } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
-import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card.tsx";
 import {
@@ -13,17 +13,17 @@ import {
   SelectValue,
 } from "@/components/ui/select.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
-import {
-  categoryLabels,
-  statusBadgeVariant,
-  type Ticket,
-  type TicketAssignee,
-} from "@/lib/ticket-display.ts";
+import { type Ticket, type TicketAssignee } from "@/lib/ticket-display.ts";
 
 // Sentinel meaning "no assignee" — Radix's Select can't use "" as an
 // Item value, same reasoning as TicketsTable.tsx's ALL/UNCLASSIFIED
 // sentinels.
 const UNASSIGNED = "UNASSIGNED";
+// Same reasoning, for "no category" — mirrors TicketsTable.tsx's filter
+// sentinel and the server's own (server/src/routes/tickets.ts's list
+// endpoint uses this exact string as a query-param sentinel; this one is
+// a distinct, purely client-side sentinel for the update Select's value).
+const UNCLASSIFIED = "UNCLASSIFIED";
 
 export function TicketDetailPage() {
   const { id } = useParams();
@@ -63,6 +63,21 @@ export function TicketDetailPage() {
     },
   });
 
+  // Shared by both the status and category Selects below — each fires this
+  // with only its own field set, matching PATCH /api/tickets/:id's partial
+  // update (server/src/routes/tickets.ts): the other field is left
+  // untouched server-side when omitted from the request body.
+  const updateTicket = useMutation({
+    mutationFn: async (update: { status?: TicketStatus; category?: TicketCategory | null }) => {
+      const { data } = await axios.patch<{ ticket: Ticket }>(`/api/tickets/${id}`, update);
+      return data.ticket;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ticket", id] });
+      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+    },
+  });
+
   return (
     <section className="flex flex-grow flex-col gap-6 p-8">
       <Button asChild variant="ghost" size="sm" className="-ml-3 w-fit">
@@ -88,10 +103,55 @@ export function TicketDetailPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-              <Badge variant={statusBadgeVariant[data.status]}>{data.status}</Badge>
-              <span>{data.category ? categoryLabels[data.category] : "Unclassified"}</span>
               <span>{data.requesterEmail}</span>
               <span>Created {new Date(data.createdAt).toLocaleString()}</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Status</span>
+                <Select
+                  value={data.status}
+                  onValueChange={(value) =>
+                    updateTicket.mutate({ status: value as TicketStatus })
+                  }
+                  disabled={updateTicket.isPending}
+                >
+                  <SelectTrigger aria-label="Status" className="w-36">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={TicketStatus.OPEN}>Open</SelectItem>
+                    <SelectItem value={TicketStatus.RESOLVED}>Resolved</SelectItem>
+                    <SelectItem value={TicketStatus.CLOSED}>Closed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Category</span>
+                <Select
+                  value={data.category ?? UNCLASSIFIED}
+                  onValueChange={(value) =>
+                    updateTicket.mutate({
+                      category: value === UNCLASSIFIED ? null : (value as TicketCategory),
+                    })
+                  }
+                  disabled={updateTicket.isPending}
+                >
+                  <SelectTrigger aria-label="Category" className="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={TicketCategory.GENERAL_QUESTION}>
+                      General Question
+                    </SelectItem>
+                    <SelectItem value={TicketCategory.TECHNICAL_QUESTION}>
+                      Technical Question
+                    </SelectItem>
+                    <SelectItem value={TicketCategory.REFUND_REQUEST}>Refund Request</SelectItem>
+                    <SelectItem value={UNCLASSIFIED}>Unclassified</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Assigned to</span>

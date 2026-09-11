@@ -131,6 +131,61 @@ ticketsRouter.get("/api/tickets/:id", apiLimiter, async (req: Request, res: Resp
   res.json({ ticket });
 });
 
+// Two independently-optional fields (a client can change just status, just
+// category, or both in one request) with no real multi-field form behind
+// them — same reasoning as assignTicketSchema below for staying local
+// rather than moving to `core`. `category` is nullable *and* optional:
+// omitted means "leave it alone," explicit `null` means "clear it back to
+// unclassified" (overriding an AI classification, per project-scope.md's
+// "Agent permissions" decision) — `status` has no such "unset" state, a
+// ticket always has one.
+const updateTicketSchema = z
+  .object({
+    status: z.nativeEnum(TicketStatus).optional(),
+    category: z.nativeEnum(TicketCategory).nullable().optional(),
+  })
+  .refine((data) => data.status !== undefined || data.category !== undefined, {
+    message: "At least one of status or category must be provided",
+  });
+
+// Same access rule as the other ticket endpoints: any authenticated user,
+// not just admins — project-scope.md's "Agent permissions" decision gives
+// regular agents full status/category control (close/reopen, override AI
+// classification), not just admins.
+ticketsRouter.patch("/api/tickets/:id", apiLimiter, async (req: Request, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const id = z.coerce.number().int().positive().safeParse(req.params.id);
+  if (!id.success) {
+    return res.status(400).json({ error: "Invalid ticket id" });
+  }
+
+  const parsed = updateTicketSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input" });
+  }
+  const { status, category } = parsed.data;
+
+  const existing = await prisma.ticket.findUnique({ where: { id: id.data } });
+  if (!existing) {
+    return res.status(404).json({ error: "Ticket not found" });
+  }
+
+  const ticket = await prisma.ticket.update({
+    where: { id: id.data },
+    data: {
+      ...(status !== undefined ? { status } : {}),
+      ...(category !== undefined ? { category } : {}),
+      updatedAt: new Date(),
+    },
+    include: { assignedTo: { select: { id: true, name: true, email: true } } },
+  });
+
+  res.json({ ticket });
+});
+
 // A single trivial field with no real form behind it (the client drives it
 // straight from a Select's onChange, not a validated multi-field form), so
 // per CLAUDE.md's data-validation convention this stays local rather than

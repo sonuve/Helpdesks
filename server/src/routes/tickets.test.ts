@@ -573,6 +573,99 @@ describe("a single-ticket-scoped session (GET /:id, PATCH /:id/assign)", () => {
     });
   });
 
+  describe("PATCH /api/tickets/:id", () => {
+    test("401s when unauthenticated", async () => {
+      const res = await request.patch(`/api/tickets/${ticketId}`).send({ status: "RESOLVED" });
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ error: "Unauthorized" });
+    });
+
+    test("updates the status", async () => {
+      const res = await agent.patch(`/api/tickets/${ticketId}`).send({ status: "RESOLVED" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.ticket.status).toBe("RESOLVED");
+    });
+
+    test("updates the category", async () => {
+      const res = await agent
+        .patch(`/api/tickets/${ticketId}`)
+        .send({ category: "REFUND_REQUEST" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.ticket.category).toBe("REFUND_REQUEST");
+    });
+
+    test("updates both status and category in one request", async () => {
+      const res = await agent
+        .patch(`/api/tickets/${ticketId}`)
+        .send({ status: "CLOSED", category: "GENERAL_QUESTION" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.ticket.status).toBe("CLOSED");
+      expect(res.body.ticket.category).toBe("GENERAL_QUESTION");
+    });
+
+    test("clears the category when it's explicitly set to null", async () => {
+      const res = await agent.patch(`/api/tickets/${ticketId}`).send({ category: null });
+
+      expect(res.status).toBe(200);
+      expect(res.body.ticket.category).toBeNull();
+    });
+
+    test("leaves category untouched when only status is given", async () => {
+      await agent.patch(`/api/tickets/${ticketId}`).send({ category: "TECHNICAL_QUESTION" });
+
+      const res = await agent.patch(`/api/tickets/${ticketId}`).send({ status: "OPEN" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.ticket.status).toBe("OPEN");
+      expect(res.body.ticket.category).toBe("TECHNICAL_QUESTION");
+    });
+
+    test("leaves status untouched when only category is given", async () => {
+      await agent.patch(`/api/tickets/${ticketId}`).send({ status: "RESOLVED" });
+
+      const res = await agent
+        .patch(`/api/tickets/${ticketId}`)
+        .send({ category: "REFUND_REQUEST" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.ticket.status).toBe("RESOLVED");
+      expect(res.body.ticket.category).toBe("REFUND_REQUEST");
+    });
+
+    test("400s for a status outside TicketStatus", async () => {
+      const res = await agent.patch(`/api/tickets/${ticketId}`).send({ status: "ARCHIVED" });
+      expect(res.status).toBe(400);
+    });
+
+    test("400s for a category that's neither a real category nor null", async () => {
+      const res = await agent
+        .patch(`/api/tickets/${ticketId}`)
+        .send({ category: "NOT_A_REAL_CATEGORY" });
+      expect(res.status).toBe(400);
+    });
+
+    test("400s when neither status nor category is provided", async () => {
+      const res = await agent.patch(`/api/tickets/${ticketId}`).send({});
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ error: "At least one of status or category must be provided" });
+    });
+
+    test("404s when the ticket doesn't exist", async () => {
+      const res = await agent.patch("/api/tickets/999999999").send({ status: "OPEN" });
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "Ticket not found" });
+    });
+
+    test("400s for a non-numeric ticket id", async () => {
+      const res = await agent.patch("/api/tickets/not-a-number").send({ status: "OPEN" });
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ error: "Invalid ticket id" });
+    });
+  });
+
   describe("PATCH /api/tickets/:id/assign", () => {
     test("401s when unauthenticated", async () => {
       const res = await request
