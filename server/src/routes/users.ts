@@ -187,14 +187,25 @@ usersRouter.delete("/api/users/:id", apiLimiter, async (req: Request, res: Respo
     return res.status(403).json({ error: "Admin users cannot be deleted" });
   }
 
+  const now = new Date();
+
   // Soft delete: keep the row (and its tickets/history) but mark it
   // deletedAt so it drops out of GET /api/users and, via the additional
   // `deletedAt` field declared in lib/auth.ts, sessionMiddleware starts
-  // rejecting any session this user already holds.
-  await prisma.user.update({
-    where: { id: userId },
-    data: { deletedAt: new Date() },
-  });
+  // rejecting any session this user already holds. schema.prisma's
+  // `onDelete: SetNull` on Ticket.assignedTo never fires here — the row
+  // isn't actually removed — so any ticket still assigned to this user is
+  // unassigned explicitly, in the same transaction as the soft delete.
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: userId },
+      data: { deletedAt: now },
+    }),
+    prisma.ticket.updateMany({
+      where: { assignedToId: userId },
+      data: { assignedToId: null, updatedAt: now },
+    }),
+  ]);
 
   res.json({ success: true });
 });
