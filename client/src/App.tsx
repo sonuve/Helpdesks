@@ -6,6 +6,7 @@ import { LoginPage } from "./pages/LoginPage.tsx";
 import { HomePage } from "./pages/HomePage.tsx";
 import { UsersPage } from "./pages/UsersPage.tsx";
 import { TicketsPage } from "./pages/TicketsPage.tsx";
+import { TicketDetailPage } from "./pages/TicketDetailPage.tsx";
 
 function App() {
   return (
@@ -17,6 +18,7 @@ function App() {
         <Route element={<ProtectedRoute />}>
           <Route path="/" element={<HomePage />} />
           <Route path="/tickets" element={<TicketsPage />} />
+          <Route path="/tickets/:id" element={<TicketDetailPage />} />
           <Route element={<AdminRoute />}>
             <Route path="/users" element={<UsersPage />} />
           </Route>

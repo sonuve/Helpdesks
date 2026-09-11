@@ -105,6 +105,28 @@ ticketsRouter.get("/api/tickets", apiLimiter, async (req: Request, res: Response
   res.json({ tickets, total, page, pageSize });
 });
 
+// Same access rule as the list endpoint above: any authenticated user, not
+// just admins.
+ticketsRouter.get("/api/tickets/:id", apiLimiter, async (req: Request, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  // Ticket.id is a numeric autoincrement (unlike User.id), so a
+  // non-numeric :id segment is a 400, not just a 404.
+  const id = z.coerce.number().int().positive().safeParse(req.params.id);
+  if (!id.success) {
+    return res.status(400).json({ error: "Invalid ticket id" });
+  }
+
+  const ticket = await prisma.ticket.findUnique({ where: { id: id.data } });
+  if (!ticket) {
+    return res.status(404).json({ error: "Ticket not found" });
+  }
+
+  res.json({ ticket });
+});
+
 // Validates a webhook-shaped request body, not a client form — there's no
 // UI behind this endpoint, so per CLAUDE.md's data-validation convention
 // this stays local here rather than moving to `core`.

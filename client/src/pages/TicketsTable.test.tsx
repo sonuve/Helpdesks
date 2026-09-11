@@ -84,6 +84,22 @@ describe("TicketsTable", () => {
     expect(screen.getByText("Refund Request")).toBeInTheDocument();
   });
 
+  it("links each row's subject to that ticket's detail page", async () => {
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET]));
+
+    renderWithQuery(<TicketsTable />);
+    await screen.findByRole("table");
+
+    expect(screen.getByRole("link", { name: "Cannot log in" })).toHaveAttribute(
+      "href",
+      "/tickets/2",
+    );
+    expect(screen.getByRole("link", { name: "Refund request" })).toHaveAttribute(
+      "href",
+      "/tickets/1",
+    );
+  });
+
   it("requests createdAt desc (newest first), page 1, the default page size, on the initial load", async () => {
     mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET]));
 

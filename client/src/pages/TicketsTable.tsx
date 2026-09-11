@@ -12,6 +12,7 @@ import {
 import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Input } from "@/components/ui/input.tsx";
@@ -31,15 +32,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table.tsx";
+import { categoryLabels, statusBadgeVariant, type Ticket } from "@/lib/ticket-display.ts";
 
-type TicketListItem = {
-  id: number;
-  status: TicketStatus;
-  category: TicketCategory | null;
-  subject: string;
-  requesterEmail: string;
-  createdAt: string;
-};
+// The list only ever renders these fields — pagination fetches page-sized
+// batches, so `body`/`updatedAt` (only needed on the single-ticket detail
+// page) would just be wasted payload here.
+type TicketListItem = Omit<Ticket, "body" | "updatedAt">;
 
 // A query param, not a real TicketCategory value — "category is null" has
 // to be expressed as *something* in a query string. Mirrors the server's
@@ -51,18 +49,6 @@ const UNCLASSIFIED = "UNCLASSIFIED";
 const ALL = "ALL";
 
 const DEFAULT_PAGE_SIZE = 10;
-
-const categoryLabels: Record<TicketCategory, string> = {
-  [TicketCategory.GENERAL_QUESTION]: "General Question",
-  [TicketCategory.TECHNICAL_QUESTION]: "Technical Question",
-  [TicketCategory.REFUND_REQUEST]: "Refund Request",
-};
-
-const statusBadgeVariant: Record<TicketStatus, "default" | "secondary" | "outline"> = {
-  [TicketStatus.OPEN]: "default",
-  [TicketStatus.RESOLVED]: "secondary",
-  [TicketStatus.CLOSED]: "outline",
-};
 
 // column.id matches GET /api/tickets' sortBy allow-list (server/src/routes/
 // tickets.ts) — both name the same Ticket fields, since a click here turns
@@ -88,6 +74,11 @@ const columns: ColumnDef<TicketListItem>[] = [
   {
     accessorKey: "subject",
     header: ({ column }) => <SortableHeader label="Subject" column={column} />,
+    cell: ({ row }) => (
+      <Link to={`/tickets/${row.original.id}`} className="hover:underline">
+        {row.original.subject}
+      </Link>
+    ),
   },
   {
     accessorKey: "requesterEmail",

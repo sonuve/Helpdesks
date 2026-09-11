@@ -442,3 +442,96 @@ describe("GET /api/tickets", () => {
     });
   });
 });
+
+describe("GET /api/tickets/:id", () => {
+  const agent = supertest.agent(app);
+  const userEmail = `server-test-ticket-detail-${Date.now()}@example.com`;
+  const userPassword = "Server-Test-Passw0rd!";
+  let userId: string;
+  let ticketId: number;
+
+  beforeAll(async () => {
+    userId = crypto.randomUUID();
+    const now = new Date();
+    await prisma.user.create({
+      data: {
+        id: userId,
+        name: "Server Test Detail Agent",
+        email: userEmail,
+        emailVerified: true,
+        role: Role.AGENT,
+        createdAt: now,
+        updatedAt: now,
+        accounts: {
+          create: {
+            id: crypto.randomUUID(),
+            accountId: userId,
+            providerId: "credential",
+            password: await hashPassword(userPassword),
+            createdAt: now,
+            updatedAt: now,
+          },
+        },
+      },
+    });
+
+    const signIn = await agent
+      .post("/api/auth/sign-in/email")
+      .send({ email: userEmail, password: userPassword });
+    if (signIn.status !== 200) {
+      throw new Error(`Test setup sign-in failed: ${signIn.status} ${JSON.stringify(signIn.body)}`);
+    }
+
+    const ticket = await prisma.ticket.create({
+      data: {
+        subject: "Detail fixture",
+        status: "OPEN",
+        category: "TECHNICAL_QUESTION",
+        body: "Full ticket body for the detail page.",
+        requesterEmail: "detail-fixture@example.com",
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    ticketId = ticket.id;
+  });
+
+  afterAll(async () => {
+    await prisma.ticket.delete({ where: { id: ticketId } });
+    await prisma.session.deleteMany({ where: { userId } });
+    await prisma.account.deleteMany({ where: { userId } });
+    await prisma.user.delete({ where: { id: userId } });
+  });
+
+  test("401s when unauthenticated", async () => {
+    const res = await request.get(`/api/tickets/${ticketId}`);
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ error: "Unauthorized" });
+  });
+
+  test("returns the full ticket, including body, for an authenticated user", async () => {
+    const res = await agent.get(`/api/tickets/${ticketId}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.ticket).toMatchObject({
+      id: ticketId,
+      subject: "Detail fixture",
+      status: "OPEN",
+      category: "TECHNICAL_QUESTION",
+      body: "Full ticket body for the detail page.",
+      requesterEmail: "detail-fixture@example.com",
+    });
+  });
+
+  test("404s for a ticket id that doesn't exist", async () => {
+    const res = await agent.get("/api/tickets/999999999");
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: "Ticket not found" });
+  });
+
+  test("400s for a non-numeric id", async () => {
+    const res = await agent.get("/api/tickets/not-a-number");
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: "Invalid ticket id" });
+  });
+});
