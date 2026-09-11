@@ -217,9 +217,35 @@ describe("GET /api/tickets", () => {
       }
     });
 
+    // A third isolated batch, spread across distinct days, just for
+    // date-range tests — isolated via a distinguishing requesterEmail
+    // rather than category (both are already spoken for above) so these
+    // assertions don't need to assume the whole ticket table is empty
+    // apart from this file's own fixtures.
+    const dateRangeTicketIds: number[] = [];
+    const dateRangeSubjects = ["Jan-1", "Jan-15", "Jan-30"];
+    const dateRangeDates = ["2026-01-01T12:00:00.000Z", "2026-01-15T12:00:00.000Z", "2026-01-30T12:00:00.000Z"];
+
+    beforeAll(async () => {
+      for (let i = 0; i < dateRangeSubjects.length; i++) {
+        const timestamp = new Date(dateRangeDates[i]!);
+        const ticket = await prisma.ticket.create({
+          data: {
+            subject: dateRangeSubjects[i]!,
+            status: "OPEN",
+            body: "date-range fixture",
+            requesterEmail: "date-range-fixture@example.com",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          },
+        });
+        dateRangeTicketIds.push(ticket.id);
+      }
+    });
+
     afterAll(async () => {
       await prisma.ticket.deleteMany({
-        where: { id: { in: [...ticketIds, ...paginationTicketIds] } },
+        where: { id: { in: [...ticketIds, ...paginationTicketIds, ...dateRangeTicketIds] } },
       });
       await prisma.session.deleteMany({ where: { userId } });
       await prisma.account.deleteMany({ where: { userId } });
@@ -370,6 +396,47 @@ describe("GET /api/tickets", () => {
 
       test("400s for a pageSize above the max", async () => {
         const res = await agent.get("/api/tickets?pageSize=101");
+        expect(res.status).toBe(400);
+      });
+    });
+
+    describe("date-range filtering", () => {
+      function subjectsOf(res: { body: { tickets: { id: number; subject: string }[] } }) {
+        return res.body.tickets
+          .filter((t) => dateRangeTicketIds.includes(t.id))
+          .map((t) => t.subject);
+      }
+
+      test("filters by createdFrom only (inclusive)", async () => {
+        const res = await agent.get("/api/tickets?createdFrom=2026-01-15&pageSize=100");
+
+        expect(res.status).toBe(200);
+        expect(subjectsOf(res)).toEqual(["Jan-30", "Jan-15"]);
+      });
+
+      test("filters by createdTo only, inclusive of the whole day", async () => {
+        const res = await agent.get("/api/tickets?createdTo=2026-01-15&pageSize=100");
+
+        expect(res.status).toBe(200);
+        expect(subjectsOf(res)).toEqual(["Jan-15", "Jan-1"]);
+      });
+
+      test("combines createdFrom and createdTo into an inclusive range", async () => {
+        const res = await agent.get(
+          "/api/tickets?createdFrom=2026-01-02&createdTo=2026-01-16&pageSize=100",
+        );
+
+        expect(res.status).toBe(200);
+        expect(subjectsOf(res)).toEqual(["Jan-15"]);
+      });
+
+      test("400s when createdFrom is after createdTo", async () => {
+        const res = await agent.get("/api/tickets?createdFrom=2026-01-30&createdTo=2026-01-01");
+        expect(res.status).toBe(400);
+      });
+
+      test("400s for an invalid createdFrom", async () => {
+        const res = await agent.get("/api/tickets?createdFrom=not-a-date");
         expect(res.status).toBe(400);
       });
     });

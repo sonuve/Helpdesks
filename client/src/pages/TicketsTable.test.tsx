@@ -225,6 +225,115 @@ describe("TicketsTable", () => {
     });
   });
 
+  it("requests a createdFrom param when a from-date is entered", async () => {
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET]));
+
+    renderWithQuery(<TicketsTable />);
+    await screen.findByRole("table");
+
+    fireEvent.change(screen.getByLabelText("Filter by created from date"), {
+      target: { value: "2026-01-01" },
+    });
+
+    expect(mockedAxios.get).toHaveBeenLastCalledWith("/api/tickets", {
+      params: {
+        sortBy: "createdAt",
+        sortOrder: "desc",
+        createdFrom: "2026-01-01",
+        page: 1,
+        pageSize: 10,
+      },
+    });
+  });
+
+  it("requests a createdTo param when a to-date is entered", async () => {
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET]));
+
+    renderWithQuery(<TicketsTable />);
+    await screen.findByRole("table");
+
+    fireEvent.change(screen.getByLabelText("Filter by created to date"), {
+      target: { value: "2026-01-31" },
+    });
+
+    expect(mockedAxios.get).toHaveBeenLastCalledWith("/api/tickets", {
+      params: {
+        sortBy: "createdAt",
+        sortOrder: "desc",
+        createdTo: "2026-01-31",
+        page: 1,
+        pageSize: 10,
+      },
+    });
+  });
+
+  it("combines createdFrom and createdTo with the other filters in the same request", async () => {
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET]));
+
+    renderWithQuery(<TicketsTable />);
+    await screen.findByRole("table");
+
+    await selectFilter("Filter by status", "Open");
+    fireEvent.change(screen.getByLabelText("Filter by created from date"), {
+      target: { value: "2026-01-01" },
+    });
+    fireEvent.change(screen.getByLabelText("Filter by created to date"), {
+      target: { value: "2026-01-31" },
+    });
+
+    expect(mockedAxios.get).toHaveBeenLastCalledWith("/api/tickets", {
+      params: {
+        sortBy: "createdAt",
+        sortOrder: "desc",
+        status: "OPEN",
+        createdFrom: "2026-01-01",
+        createdTo: "2026-01-31",
+        page: 1,
+        pageSize: 10,
+      },
+    });
+  });
+
+  it("drops the createdFrom param again after clearing the from-date", async () => {
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET]));
+
+    renderWithQuery(<TicketsTable />);
+    await screen.findByRole("table");
+
+    const fromInput = screen.getByLabelText("Filter by created from date");
+    fireEvent.change(fromInput, { target: { value: "2026-01-01" } });
+    fireEvent.change(fromInput, { target: { value: "" } });
+
+    expect(mockedAxios.get).toHaveBeenLastCalledWith("/api/tickets", {
+      params: { sortBy: "createdAt", sortOrder: "desc", page: 1, pageSize: 10 },
+    });
+  });
+
+  it("resets to page 1 when the date range changes while on a later page", async () => {
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET], 30));
+
+    renderWithQuery(<TicketsTable />);
+    await screen.findByRole("table");
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("Page 2 of 3 (30 tickets)");
+
+    fireEvent.change(screen.getByLabelText("Filter by created from date"), {
+      target: { value: "2026-01-01" },
+    });
+
+    await screen.findByText(/^Page 1 of/);
+    expect(mockedAxios.get).toHaveBeenLastCalledWith("/api/tickets", {
+      params: {
+        sortBy: "createdAt",
+        sortOrder: "desc",
+        createdFrom: "2026-01-01",
+        page: 1,
+        pageSize: 10,
+      },
+    });
+  });
+
   it("resets to page 1 when a filter changes while on a later page", async () => {
     mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET], 30));
 
@@ -298,6 +407,8 @@ describe("TicketsTable", () => {
 
     expect(screen.getByRole("combobox", { name: "Filter by status" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Filter by category" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Filter by created from date")).toBeInTheDocument();
+    expect(screen.getByLabelText("Filter by created to date")).toBeInTheDocument();
   });
 
   it("shows an empty state when there are no tickets", async () => {

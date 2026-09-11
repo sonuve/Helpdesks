@@ -14,6 +14,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
+import { Input } from "@/components/ui/input.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
 import {
   Select,
@@ -122,6 +123,11 @@ export function TicketsTable() {
   const [categoryFilter, setCategoryFilter] = useState<
     TicketCategory | typeof UNCLASSIFIED | typeof ALL
   >(ALL);
+  // "YYYY-MM-DD" (an <input type="date">'s native value format) or "" for
+  // unset — sent to the server as-is, which coerces it and expands
+  // createdTo to the end of that day (server/src/routes/tickets.ts).
+  const [createdFrom, setCreatedFrom] = useState("");
+  const [createdTo, setCreatedTo] = useState("");
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
     pageSize: DEFAULT_PAGE_SIZE,
@@ -136,7 +142,15 @@ export function TicketsTable() {
   }
 
   const { data, isPending, isError } = useQuery({
-    queryKey: ["tickets", sort, statusFilter, categoryFilter, pagination],
+    queryKey: [
+      "tickets",
+      sort,
+      statusFilter,
+      categoryFilter,
+      createdFrom,
+      createdTo,
+      pagination,
+    ],
     queryFn: async () => {
       // Sorting, filtering, and pagination all happen on the server: these
       // params are passed straight through to GET /api/tickets (see
@@ -150,6 +164,8 @@ export function TicketsTable() {
             ...(sort ? { sortBy: sort.id, sortOrder: sort.desc ? "desc" : "asc" } : {}),
             ...(statusFilter !== ALL ? { status: statusFilter } : {}),
             ...(categoryFilter !== ALL ? { category: categoryFilter } : {}),
+            ...(createdFrom ? { createdFrom } : {}),
+            ...(createdTo ? { createdTo } : {}),
             page: pagination.pageIndex + 1,
             pageSize: pagination.pageSize,
           },
@@ -216,6 +232,26 @@ export function TicketsTable() {
             <SelectItem value={UNCLASSIFIED}>Unclassified</SelectItem>
           </SelectContent>
         </Select>
+        <Input
+          type="date"
+          aria-label="Filter by created from date"
+          className="w-40"
+          value={createdFrom}
+          onChange={(e) => {
+            setCreatedFrom(e.target.value);
+            backToFirstPage();
+          }}
+        />
+        <Input
+          type="date"
+          aria-label="Filter by created to date"
+          className="w-40"
+          value={createdTo}
+          onChange={(e) => {
+            setCreatedTo(e.target.value);
+            backToFirstPage();
+          }}
+        />
       </div>
 
       {isError ? (

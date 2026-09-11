@@ -21,23 +21,40 @@ export const ticketsRouter = Router();
 // `core`. The sortBy allow-list exists because this is a real HTTP query
 // param any caller can set — without it, an arbitrary field name would
 // reach Prisma's `orderBy`.
-const listTicketsQuerySchema = z.object({
-  sortBy: z
-    .enum(["id", "subject", "requesterEmail", "status", "category", "createdAt"])
-    .default("createdAt"),
-  sortOrder: z.enum(["asc", "desc"]).default("desc"),
-  status: z.nativeEnum(TicketStatus).optional(),
-  // "UNCLASSIFIED" is a sentinel, not a real TicketCategory value — a
-  // query param can't express "category is null" any other way, and
-  // z.nativeEnum(TicketCategory) alone can't match it.
-  category: z.union([z.nativeEnum(TicketCategory), z.literal("UNCLASSIFIED")]).optional(),
-  // 1-indexed, matching how it's shown in the UI ("Page 1 of N") — the
-  // conversion to Prisma's 0-indexed `skip` happens below, not in the
-  // param itself. Capped at 100 so a caller can't force-load the entire
-  // table in one page.
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(10),
-});
+const listTicketsQuerySchema = z
+  .object({
+    sortBy: z
+      .enum(["id", "subject", "requesterEmail", "status", "category", "createdAt"])
+      .default("createdAt"),
+    sortOrder: z.enum(["asc", "desc"]).default("desc"),
+    status: z.nativeEnum(TicketStatus).optional(),
+    // "UNCLASSIFIED" is a sentinel, not a real TicketCategory value — a
+    // query param can't express "category is null" any other way, and
+    // z.nativeEnum(TicketCategory) alone can't match it.
+    category: z.union([z.nativeEnum(TicketCategory), z.literal("UNCLASSIFIED")]).optional(),
+    // 1-indexed, matching how it's shown in the UI ("Page 1 of N") — the
+    // conversion to Prisma's 0-indexed `skip` happens below, not in the
+    // param itself. Capped at 100 so a caller can't force-load the entire
+    // table in one page.
+    page: z.coerce.number().int().min(1).default(1),
+    pageSize: z.coerce.number().int().min(1).max(100).default(10),
+    // Plain "YYYY-MM-DD" from the client's <input type="date">. z.coerce.date()
+    // parses that as UTC midnight; createdTo is expanded to the end of that
+    // day below (see endOfDay) so the filter is inclusive of the whole day,
+    // not just its first instant.
+    createdFrom: z.coerce.date({ invalid_type_error: "createdFrom must be a valid date" }).optional(),
+    createdTo: z.coerce.date({ invalid_type_error: "createdTo must be a valid date" }).optional(),
+  })
+  .refine((data) => !data.createdFrom || !data.createdTo || data.createdFrom <= data.createdTo, {
+    message: "createdFrom must be on or before createdTo",
+    path: ["createdFrom"],
+  });
+
+function endOfDay(date: Date): Date {
+  const end = new Date(date);
+  end.setUTCHours(23, 59, 59, 999);
+  return end;
+}
 
 // Unlike server/src/routes/users.ts, this isn't ADMIN-only: per
 // project-scope.md's "Agent permissions" decision, regular agents have
@@ -52,15 +69,24 @@ ticketsRouter.get("/api/tickets", apiLimiter, async (req: Request, res: Response
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input" });
   }
-  const { sortBy, sortOrder, status, category, page, pageSize } = parsed.data;
+  const { sortBy, sortOrder, status, category, page, pageSize, createdFrom, createdTo } =
+    parsed.data;
 
   // Filtering happens here too, for the same reason as sorting: the client
-  // sends status/category as query params and renders the (already
-  // filtered) response as-is, rather than filtering a fully-loaded page
-  // itself.
+  // sends status/category/createdFrom/createdTo as query params and
+  // renders the (already filtered) response as-is, rather than filtering a
+  // fully-loaded page itself.
   const where: Prisma.TicketWhereInput = {
     ...(status ? { status } : {}),
     ...(category === "UNCLASSIFIED" ? { category: null } : category ? { category } : {}),
+    ...(createdFrom || createdTo
+      ? {
+          createdAt: {
+            ...(createdFrom ? { gte: createdFrom } : {}),
+            ...(createdTo ? { lte: endOfDay(createdTo) } : {}),
+          },
+        }
+      : {}),
   };
 
   // Pagination happens here as well: the client only ever holds one page
