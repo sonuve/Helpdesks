@@ -5,6 +5,7 @@ import { AdminRoute } from "./components/AdminRoute.tsx";
 import { LoginPage } from "./pages/LoginPage.tsx";
 import { HomePage } from "./pages/HomePage.tsx";
 import { UsersPage } from "./pages/UsersPage.tsx";
+import { TicketsPage } from "./pages/TicketsPage.tsx";
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
         </Route>
         <Route element={<ProtectedRoute />}>
           <Route path="/" element={<HomePage />} />
+          <Route path="/tickets" element={<TicketsPage />} />
           <Route element={<AdminRoute />}>
             <Route path="/users" element={<UsersPage />} />
           </Route>

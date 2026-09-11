@@ -10,6 +10,7 @@
     "build": "bun run --filter client build",
     "typecheck": "bun run --filter core typecheck && bun run --filter server typecheck",
     "test": "bun run --filter client test",
+    "test:server": "bun run --filter server test",
     "test:e2e": "bun run --filter e2e test",
     "test:e2e:ui": "bun run --filter e2e test:ui"
   }

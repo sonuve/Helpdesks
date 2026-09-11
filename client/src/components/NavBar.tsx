@@ -19,6 +19,9 @@ export function NavBar() {
         <Link to="/" className="font-semibold text-foreground">
           Helpdesks
         </Link>
+        <Button asChild type="button" variant="ghost" size="sm">
+          <Link to="/tickets">Tickets</Link>
+        </Button>
         {user?.role === Role.ADMIN && (
           <Button asChild type="button" variant="ghost" size="sm">
             <Link to="/users">Users</Link>
