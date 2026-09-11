@@ -32,6 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table.tsx";
+import { ErrorMessage } from "@/components/ErrorMessage.tsx";
 import {
   categoryLabels,
   statusBadgeVariant,
@@ -266,7 +267,7 @@ export function TicketsTable() {
       </div>
 
       {isError ? (
-        <p className="text-destructive">Could not load tickets — is the server running?</p>
+        <ErrorMessage message="Could not load tickets — is the server running?" />
       ) : isPending ? (
         <div className="flex flex-col gap-3">
           {Array.from({ length: 5 }).map((_, i) => (

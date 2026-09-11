@@ -1,6 +1,7 @@
 import axios from "axios";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
+import { ErrorMessage } from "@/components/ErrorMessage.tsx";
 
 export function HomePage() {
   const { data, isPending, isError } = useQuery({
@@ -17,7 +18,7 @@ export function HomePage() {
       {isPending ? (
         <Skeleton className="h-5 w-56" />
       ) : isError ? (
-        <p className="text-destructive">Could not reach the API — is the server running?</p>
+        <ErrorMessage message="Could not reach the API — is the server running?" />
       ) : (
         <p className="text-muted-foreground">API status: {data.status}</p>
       )}

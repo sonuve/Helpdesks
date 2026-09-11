@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Skeleton } from "@/components/ui/skeleton.tsx";
+import { ErrorMessage } from "@/components/ErrorMessage.tsx";
 import {
   Table,
   TableBody,
@@ -38,7 +39,7 @@ export function UsersTable() {
   });
 
   if (isError) {
-    return <p className="text-destructive">Could not load users — is the server running?</p>;
+    return <ErrorMessage message="Could not load users — is the server running?" />;
   }
 
   if (isPending) {
