@@ -126,6 +126,7 @@ describe("GET /api/tickets", () => {
     const userPassword = "Server-Test-Passw0rd!";
     let userId: string;
     const ticketIds: number[] = [];
+    const paginationTicketIds: number[] = [];
 
     beforeAll(async () => {
       userId = crypto.randomUUID();
@@ -192,17 +193,46 @@ describe("GET /api/tickets", () => {
         });
         ticketIds.push(ticket.id);
       }
+
+      // A separate batch just for pagination tests, sharing a category
+      // none of the three fixtures above use (REFUND_REQUEST) — filtering
+      // on it isolates exactly these 5 regardless of whatever else is in
+      // the table, so pagination tests don't need to assume the whole
+      // ticket table is empty apart from this file's own fixtures.
+      const paginationSubjects = ["Page-A", "Page-B", "Page-C", "Page-D", "Page-E"];
+      for (let i = 0; i < paginationSubjects.length; i++) {
+        const timestamp = new Date(baseTime + (fixtures.length + i) * 1000);
+        const ticket = await prisma.ticket.create({
+          data: {
+            subject: paginationSubjects[i]!,
+            status: "OPEN",
+            category: "REFUND_REQUEST",
+            body: "pagination fixture",
+            requesterEmail: "pagination-fixture@example.com",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          },
+        });
+        paginationTicketIds.push(ticket.id);
+      }
     });
 
     afterAll(async () => {
-      await prisma.ticket.deleteMany({ where: { id: { in: ticketIds } } });
+      await prisma.ticket.deleteMany({
+        where: { id: { in: [...ticketIds, ...paginationTicketIds] } },
+      });
       await prisma.session.deleteMany({ where: { userId } });
       await prisma.account.deleteMany({ where: { userId } });
       await prisma.user.delete({ where: { id: userId } });
     });
 
+    // pageSize=100 on these: default pageSize is only 10, and these
+    // assertions need every one of this file's own fixtures to actually be
+    // present in the response, regardless of how many other tickets exist
+    // in the (shared) test database — see the "pagination" describe below
+    // for pageSize/page behavior itself.
     test("defaults to createdAt desc (newest first) with no query params", async () => {
-      const res = await agent.get("/api/tickets");
+      const res = await agent.get("/api/tickets?pageSize=100");
 
       expect(res.status).toBe(200);
       const ids = (res.body.tickets as { id: number }[]).map((t) => t.id);
@@ -214,7 +244,7 @@ describe("GET /api/tickets", () => {
     });
 
     test("sorts by subject ascending when asked", async () => {
-      const res = await agent.get("/api/tickets?sortBy=subject&sortOrder=asc");
+      const res = await agent.get("/api/tickets?sortBy=subject&sortOrder=asc&pageSize=100");
 
       expect(res.status).toBe(200);
       const ours = (res.body.tickets as { id: number; subject: string }[]).filter((t) =>
@@ -224,7 +254,7 @@ describe("GET /api/tickets", () => {
     });
 
     test("sorts by subject descending when asked", async () => {
-      const res = await agent.get("/api/tickets?sortBy=subject&sortOrder=desc");
+      const res = await agent.get("/api/tickets?sortBy=subject&sortOrder=desc&pageSize=100");
 
       expect(res.status).toBe(200);
       const ours = (res.body.tickets as { id: number; subject: string }[]).filter((t) =>
@@ -234,7 +264,7 @@ describe("GET /api/tickets", () => {
     });
 
     test("filters by status", async () => {
-      const res = await agent.get("/api/tickets?status=RESOLVED");
+      const res = await agent.get("/api/tickets?status=RESOLVED&pageSize=100");
 
       expect(res.status).toBe(200);
       const ours = (res.body.tickets as { id: number; subject: string }[]).filter((t) =>
@@ -244,7 +274,7 @@ describe("GET /api/tickets", () => {
     });
 
     test("filters by category", async () => {
-      const res = await agent.get("/api/tickets?category=GENERAL_QUESTION");
+      const res = await agent.get("/api/tickets?category=GENERAL_QUESTION&pageSize=100");
 
       expect(res.status).toBe(200);
       const ours = (res.body.tickets as { id: number; subject: string }[]).filter((t) =>
@@ -254,7 +284,7 @@ describe("GET /api/tickets", () => {
     });
 
     test("filters by the UNCLASSIFIED sentinel to find tickets with no category", async () => {
-      const res = await agent.get("/api/tickets?category=UNCLASSIFIED");
+      const res = await agent.get("/api/tickets?category=UNCLASSIFIED&pageSize=100");
 
       expect(res.status).toBe(200);
       const ours = (res.body.tickets as { id: number; subject: string }[]).filter((t) =>
@@ -281,6 +311,67 @@ describe("GET /api/tickets", () => {
     test("400s for a category that's neither TicketCategory nor UNCLASSIFIED", async () => {
       const res = await agent.get("/api/tickets?category=NOT_A_REAL_CATEGORY");
       expect(res.status).toBe(400);
+    });
+
+    // Isolated via category=REFUND_REQUEST (see paginationTicketIds' setup
+    // above) so these don't need to assume the whole ticket table is empty
+    // apart from this file's own fixtures.
+    describe("pagination", () => {
+      test("defaults to page 1 / pageSize 10 and reports the true total", async () => {
+        const res = await agent.get("/api/tickets?category=REFUND_REQUEST");
+
+        expect(res.status).toBe(200);
+        expect(res.body.page).toBe(1);
+        expect(res.body.pageSize).toBe(10);
+        expect(res.body.total).toBe(5);
+        expect(res.body.tickets).toHaveLength(5);
+      });
+
+      test("limits results to the requested pageSize while still reporting the full total", async () => {
+        const res = await agent.get(
+          "/api/tickets?category=REFUND_REQUEST&pageSize=2&sortBy=subject&sortOrder=asc",
+        );
+
+        expect(res.status).toBe(200);
+        expect(res.body.total).toBe(5);
+        expect((res.body.tickets as { subject: string }[]).map((t) => t.subject)).toEqual([
+          "Page-A",
+          "Page-B",
+        ]);
+      });
+
+      test("returns the second page's results", async () => {
+        const res = await agent.get(
+          "/api/tickets?category=REFUND_REQUEST&pageSize=2&page=2&sortBy=subject&sortOrder=asc",
+        );
+
+        expect(res.status).toBe(200);
+        expect((res.body.tickets as { subject: string }[]).map((t) => t.subject)).toEqual([
+          "Page-C",
+          "Page-D",
+        ]);
+      });
+
+      test("returns a partial final page", async () => {
+        const res = await agent.get(
+          "/api/tickets?category=REFUND_REQUEST&pageSize=2&page=3&sortBy=subject&sortOrder=asc",
+        );
+
+        expect(res.status).toBe(200);
+        expect((res.body.tickets as { subject: string }[]).map((t) => t.subject)).toEqual([
+          "Page-E",
+        ]);
+      });
+
+      test("400s for a page below 1", async () => {
+        const res = await agent.get("/api/tickets?page=0");
+        expect(res.status).toBe(400);
+      });
+
+      test("400s for a pageSize above the max", async () => {
+        const res = await agent.get("/api/tickets?pageSize=101");
+        expect(res.status).toBe(400);
+      });
     });
   });
 });

@@ -31,6 +31,12 @@ const listTicketsQuerySchema = z.object({
   // query param can't express "category is null" any other way, and
   // z.nativeEnum(TicketCategory) alone can't match it.
   category: z.union([z.nativeEnum(TicketCategory), z.literal("UNCLASSIFIED")]).optional(),
+  // 1-indexed, matching how it's shown in the UI ("Page 1 of N") — the
+  // conversion to Prisma's 0-indexed `skip` happens below, not in the
+  // param itself. Capped at 100 so a caller can't force-load the entire
+  // table in one page.
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(10),
 });
 
 // Unlike server/src/routes/users.ts, this isn't ADMIN-only: per
@@ -46,7 +52,7 @@ ticketsRouter.get("/api/tickets", apiLimiter, async (req: Request, res: Response
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input" });
   }
-  const { sortBy, sortOrder, status, category } = parsed.data;
+  const { sortBy, sortOrder, status, category, page, pageSize } = parsed.data;
 
   // Filtering happens here too, for the same reason as sorting: the client
   // sends status/category as query params and renders the (already
@@ -57,12 +63,20 @@ ticketsRouter.get("/api/tickets", apiLimiter, async (req: Request, res: Response
     ...(category === "UNCLASSIFIED" ? { category: null } : category ? { category } : {}),
   };
 
-  const tickets = await prisma.ticket.findMany({
-    where,
-    orderBy: { [sortBy]: sortOrder },
-  });
+  // Pagination happens here as well: the client only ever holds one page
+  // of tickets at a time, not the full (filtered) table, and asks the
+  // server for `total` to know how many pages exist.
+  const [tickets, total] = await Promise.all([
+    prisma.ticket.findMany({
+      where,
+      orderBy: { [sortBy]: sortOrder },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.ticket.count({ where }),
+  ]);
 
-  res.json({ tickets });
+  res.json({ tickets, total, page, pageSize });
 });
 
 // Validates a webhook-shaped request body, not a client form — there's no

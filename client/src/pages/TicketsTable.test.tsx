@@ -29,6 +29,14 @@ const OLDER_TICKET = {
   createdAt: "2026-01-15T00:00:00.000Z",
 };
 
+// A page's worth of tickets, plus the total count across all pages — what
+// GET /api/tickets actually returns once pagination is involved. `total`
+// defaults to the page's own length (as if it's the only page) unless a
+// test overrides it to exercise multi-page behavior.
+function ticketsResponse(tickets: unknown[], total = tickets.length) {
+  return { data: { tickets, total } };
+}
+
 beforeEach(() => {
   mockedAxios.get.mockReset();
 });
@@ -53,7 +61,7 @@ describe("TicketsTable", () => {
   });
 
   it("renders a row per ticket, in the order the API returns them", async () => {
-    mockedAxios.get.mockResolvedValue({ data: { tickets: [NEWER_TICKET, OLDER_TICKET] } });
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET]));
 
     renderWithQuery(<TicketsTable />);
 
@@ -76,19 +84,19 @@ describe("TicketsTable", () => {
     expect(screen.getByText("Refund Request")).toBeInTheDocument();
   });
 
-  it("requests createdAt desc (newest first) on the initial load", async () => {
-    mockedAxios.get.mockResolvedValue({ data: { tickets: [NEWER_TICKET, OLDER_TICKET] } });
+  it("requests createdAt desc (newest first), page 1, the default page size, on the initial load", async () => {
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET]));
 
     renderWithQuery(<TicketsTable />);
     await screen.findByRole("table");
 
     expect(mockedAxios.get).toHaveBeenCalledWith("/api/tickets", {
-      params: { sortBy: "createdAt", sortOrder: "desc" },
+      params: { sortBy: "createdAt", sortOrder: "desc", page: 1, pageSize: 10 },
     });
   });
 
   it("re-requests with the clicked column's sortBy, ascending on the first click, and re-renders whatever the server sends back", async () => {
-    mockedAxios.get.mockResolvedValue({ data: { tickets: [NEWER_TICKET, OLDER_TICKET] } });
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET]));
 
     renderWithQuery(<TicketsTable />);
     await screen.findByRole("table");
@@ -97,13 +105,13 @@ describe("TicketsTable", () => {
     // (unsorted-by-subject) order regardless of what was requested, and
     // the table just renders it — proving sorting isn't happening
     // client-side.
-    mockedAxios.get.mockResolvedValue({ data: { tickets: [OLDER_TICKET, NEWER_TICKET] } });
+    mockedAxios.get.mockResolvedValue(ticketsResponse([OLDER_TICKET, NEWER_TICKET]));
     fireEvent.click(screen.getByRole("button", { name: "Subject" }));
 
     await screen.findByText("Refund request"); // now first, per the new mock response
 
     expect(mockedAxios.get).toHaveBeenCalledWith("/api/tickets", {
-      params: { sortBy: "subject", sortOrder: "asc" },
+      params: { sortBy: "subject", sortOrder: "asc", page: 1, pageSize: 10 },
     });
     const rows = screen.getAllByRole("row");
     expect(rows[1]).toHaveTextContent("Refund request");
@@ -111,7 +119,7 @@ describe("TicketsTable", () => {
   });
 
   it("toggles to descending on a second click of the same column", async () => {
-    mockedAxios.get.mockResolvedValue({ data: { tickets: [NEWER_TICKET, OLDER_TICKET] } });
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET]));
 
     renderWithQuery(<TicketsTable />);
     await screen.findByRole("table");
@@ -121,12 +129,12 @@ describe("TicketsTable", () => {
     fireEvent.click(screen.getByRole("button", { name: "Subject" })); // desc
 
     expect(mockedAxios.get).toHaveBeenLastCalledWith("/api/tickets", {
-      params: { sortBy: "subject", sortOrder: "desc" },
+      params: { sortBy: "subject", sortOrder: "desc", page: 1, pageSize: 10 },
     });
   });
 
   it("requests a status filter when one is selected, alongside the default sort", async () => {
-    mockedAxios.get.mockResolvedValue({ data: { tickets: [NEWER_TICKET, OLDER_TICKET] } });
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET]));
 
     renderWithQuery(<TicketsTable />);
     await screen.findByRole("table");
@@ -134,12 +142,18 @@ describe("TicketsTable", () => {
     await selectFilter("Filter by status", "Resolved");
 
     expect(mockedAxios.get).toHaveBeenLastCalledWith("/api/tickets", {
-      params: { sortBy: "createdAt", sortOrder: "desc", status: "RESOLVED" },
+      params: {
+        sortBy: "createdAt",
+        sortOrder: "desc",
+        status: "RESOLVED",
+        page: 1,
+        pageSize: 10,
+      },
     });
   });
 
   it("requests a category filter when one is selected", async () => {
-    mockedAxios.get.mockResolvedValue({ data: { tickets: [NEWER_TICKET, OLDER_TICKET] } });
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET]));
 
     renderWithQuery(<TicketsTable />);
     await screen.findByRole("table");
@@ -147,12 +161,18 @@ describe("TicketsTable", () => {
     await selectFilter("Filter by category", "Refund Request");
 
     expect(mockedAxios.get).toHaveBeenLastCalledWith("/api/tickets", {
-      params: { sortBy: "createdAt", sortOrder: "desc", category: "REFUND_REQUEST" },
+      params: {
+        sortBy: "createdAt",
+        sortOrder: "desc",
+        category: "REFUND_REQUEST",
+        page: 1,
+        pageSize: 10,
+      },
     });
   });
 
   it("requests the UNCLASSIFIED sentinel for the 'Unclassified' category option", async () => {
-    mockedAxios.get.mockResolvedValue({ data: { tickets: [NEWER_TICKET, OLDER_TICKET] } });
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET]));
 
     renderWithQuery(<TicketsTable />);
     await screen.findByRole("table");
@@ -160,12 +180,18 @@ describe("TicketsTable", () => {
     await selectFilter("Filter by category", "Unclassified");
 
     expect(mockedAxios.get).toHaveBeenLastCalledWith("/api/tickets", {
-      params: { sortBy: "createdAt", sortOrder: "desc", category: "UNCLASSIFIED" },
+      params: {
+        sortBy: "createdAt",
+        sortOrder: "desc",
+        category: "UNCLASSIFIED",
+        page: 1,
+        pageSize: 10,
+      },
     });
   });
 
   it("drops the status param again after switching back to 'All statuses'", async () => {
-    mockedAxios.get.mockResolvedValue({ data: { tickets: [NEWER_TICKET, OLDER_TICKET] } });
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET]));
 
     renderWithQuery(<TicketsTable />);
     await screen.findByRole("table");
@@ -174,12 +200,12 @@ describe("TicketsTable", () => {
     await selectFilter("Filter by status", "All statuses");
 
     expect(mockedAxios.get).toHaveBeenLastCalledWith("/api/tickets", {
-      params: { sortBy: "createdAt", sortOrder: "desc" },
+      params: { sortBy: "createdAt", sortOrder: "desc", page: 1, pageSize: 10 },
     });
   });
 
   it("combines a status filter with a category filter in the same request", async () => {
-    mockedAxios.get.mockResolvedValue({ data: { tickets: [NEWER_TICKET, OLDER_TICKET] } });
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET]));
 
     renderWithQuery(<TicketsTable />);
     await screen.findByRole("table");
@@ -193,12 +219,79 @@ describe("TicketsTable", () => {
         sortOrder: "desc",
         status: "OPEN",
         category: "TECHNICAL_QUESTION",
+        page: 1,
+        pageSize: 10,
       },
     });
   });
 
+  it("resets to page 1 when a filter changes while on a later page", async () => {
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET], 30));
+
+    renderWithQuery(<TicketsTable />);
+    await screen.findByRole("table");
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("Page 2 of 3 (30 tickets)");
+
+    await selectFilter("Filter by status", "Open");
+
+    await screen.findByText(/^Page 1 of/);
+    expect(mockedAxios.get).toHaveBeenLastCalledWith("/api/tickets", {
+      params: {
+        sortBy: "createdAt",
+        sortOrder: "desc",
+        status: "OPEN",
+        page: 1,
+        pageSize: 10,
+      },
+    });
+  });
+
+  it("shows page/total info and disables Previous on the first page", async () => {
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET], 2));
+
+    renderWithQuery(<TicketsTable />);
+    await screen.findByRole("table");
+
+    expect(screen.getByText("Page 1 of 1 (2 tickets)")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+  });
+
+  it("requests page 2 with the same sort/filters when Next is clicked, and enables Previous", async () => {
+    // 25 total with the default pageSize of 10 means 3 pages.
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET], 25));
+
+    renderWithQuery(<TicketsTable />);
+    await screen.findByRole("table");
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("Page 2 of 3 (25 tickets)");
+
+    expect(mockedAxios.get).toHaveBeenLastCalledWith("/api/tickets", {
+      params: { sortBy: "createdAt", sortOrder: "desc", page: 2, pageSize: 10 },
+    });
+    expect(screen.getByRole("button", { name: "Previous" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
+  });
+
+  it("disables Next once on the last page", async () => {
+    // 15 total / pageSize 10 = 2 pages; landing on page 2 is the last one.
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET], 15));
+
+    renderWithQuery(<TicketsTable />);
+    await screen.findByRole("table");
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("Page 2 of 2 (15 tickets)");
+
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Previous" })).toBeEnabled();
+  });
+
   it("keeps the filter controls visible and usable when a filter matches nothing", async () => {
-    mockedAxios.get.mockResolvedValue({ data: { tickets: [] } });
+    mockedAxios.get.mockResolvedValue(ticketsResponse([]));
 
     renderWithQuery(<TicketsTable />);
     await screen.findByText("No tickets found.");
@@ -208,7 +301,7 @@ describe("TicketsTable", () => {
   });
 
   it("shows an empty state when there are no tickets", async () => {
-    mockedAxios.get.mockResolvedValue({ data: { tickets: [] } });
+    mockedAxios.get.mockResolvedValue(ticketsResponse([]));
 
     renderWithQuery(<TicketsTable />);
 

@@ -6,6 +6,7 @@ import {
   useReactTable,
   type Column,
   type ColumnDef,
+  type PaginationState,
   type SortingState,
 } from "@tanstack/react-table";
 import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon } from "lucide-react";
@@ -47,6 +48,8 @@ const UNCLASSIFIED = "UNCLASSIFIED";
 // Item value (Radix reserves it for "nothing selected"), so this stands
 // in for "don't send this param at all."
 const ALL = "ALL";
+
+const DEFAULT_PAGE_SIZE = 10;
 
 const categoryLabels: Record<TicketCategory, string> = {
   [TicketCategory.GENERAL_QUESTION]: "General Question",
@@ -119,32 +122,57 @@ export function TicketsTable() {
   const [categoryFilter, setCategoryFilter] = useState<
     TicketCategory | typeof UNCLASSIFIED | typeof ALL
   >(ALL);
+  const [pagination, setPagination] = useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: DEFAULT_PAGE_SIZE,
+  });
   const sort = sorting[0];
 
-  const { data: tickets, isPending, isError } = useQuery({
-    queryKey: ["tickets", sort, statusFilter, categoryFilter],
+  // Changing sort/filters without resetting the page can strand the user
+  // on a page number that no longer exists for the new result set (e.g.
+  // page 4 of a filter that now only has 1 page).
+  function backToFirstPage() {
+    setPagination((p) => ({ ...p, pageIndex: 0 }));
+  }
+
+  const { data, isPending, isError } = useQuery({
+    queryKey: ["tickets", sort, statusFilter, categoryFilter, pagination],
     queryFn: async () => {
-      // Sorting and filtering both happen on the server: these params are
-      // passed straight through to GET /api/tickets (see server/src/routes/
-      // tickets.ts), and the response is rendered as-is — never re-sorted
-      // or re-filtered here.
-      const { data } = await axios.get<{ tickets: TicketListItem[] }>("/api/tickets", {
-        params: {
-          ...(sort ? { sortBy: sort.id, sortOrder: sort.desc ? "desc" : "asc" } : {}),
-          ...(statusFilter !== ALL ? { status: statusFilter } : {}),
-          ...(categoryFilter !== ALL ? { category: categoryFilter } : {}),
+      // Sorting, filtering, and pagination all happen on the server: these
+      // params are passed straight through to GET /api/tickets (see
+      // server/src/routes/tickets.ts), and the response — one page's worth
+      // of tickets, plus the total count across all pages — is rendered
+      // as-is, never re-sorted/re-filtered/re-paginated here.
+      const { data } = await axios.get<{ tickets: TicketListItem[]; total: number }>(
+        "/api/tickets",
+        {
+          params: {
+            ...(sort ? { sortBy: sort.id, sortOrder: sort.desc ? "desc" : "asc" } : {}),
+            ...(statusFilter !== ALL ? { status: statusFilter } : {}),
+            ...(categoryFilter !== ALL ? { category: categoryFilter } : {}),
+            page: pagination.pageIndex + 1,
+            pageSize: pagination.pageSize,
+          },
         },
-      });
-      return data.tickets;
+      );
+      return data;
     },
   });
+  const tickets = data?.tickets;
+  const total = data?.total ?? 0;
 
   const table = useReactTable({
     data: tickets ?? [],
     columns,
-    state: { sorting },
-    onSortingChange: setSorting,
+    state: { sorting, pagination },
+    onSortingChange: (updater) => {
+      setSorting(updater);
+      backToFirstPage();
+    },
+    onPaginationChange: setPagination,
     manualSorting: true,
+    manualPagination: true,
+    pageCount: Math.max(1, Math.ceil(total / pagination.pageSize)),
     enableMultiSort: false,
     enableSortingRemoval: false,
     getCoreRowModel: getCoreRowModel(),
@@ -155,7 +183,10 @@ export function TicketsTable() {
       <div className="flex flex-wrap items-center gap-3">
         <Select
           value={statusFilter}
-          onValueChange={(value) => setStatusFilter(value as TicketStatus | typeof ALL)}
+          onValueChange={(value) => {
+            setStatusFilter(value as TicketStatus | typeof ALL);
+            backToFirstPage();
+          }}
         >
           <SelectTrigger aria-label="Filter by status" className="w-40">
             <SelectValue />
@@ -169,9 +200,10 @@ export function TicketsTable() {
         </Select>
         <Select
           value={categoryFilter}
-          onValueChange={(value) =>
-            setCategoryFilter(value as TicketCategory | typeof UNCLASSIFIED | typeof ALL)
-          }
+          onValueChange={(value) => {
+            setCategoryFilter(value as TicketCategory | typeof UNCLASSIFIED | typeof ALL);
+            backToFirstPage();
+          }}
         >
           <SelectTrigger aria-label="Filter by category" className="w-52">
             <SelectValue />
@@ -194,33 +226,59 @@ export function TicketsTable() {
             <Skeleton key={i} className="h-10 w-full" />
           ))}
         </div>
-      ) : tickets.length === 0 ? (
+      ) : !tickets || tickets.length === 0 ? (
         <p className="text-muted-foreground">No tickets found.</p>
       ) : (
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id}>
-                    {flexRender(header.column.columnDef.header, header.getContext())}
-                  </TableHead>
-                ))}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {table.getRowModel().rows.map((row) => (
-              <TableRow key={row.id}>
-                {row.getVisibleCells().map((cell) => (
-                  <TableCell key={cell.id}>
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <>
+          <Table>
+            <TableHeader>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <TableRow key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => (
+                    <TableHead key={header.id}>
+                      {flexRender(header.column.columnDef.header, header.getContext())}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              ))}
+            </TableHeader>
+            <TableBody>
+              {table.getRowModel().rows.map((row) => (
+                <TableRow key={row.id}>
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id}>
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              Page {pagination.pageIndex + 1} of {table.getPageCount()} ({total} ticket
+              {total === 1 ? "" : "s"})
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => table.previousPage()}
+                disabled={!table.getCanPreviousPage()}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => table.nextPage()}
+                disabled={!table.getCanNextPage()}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
