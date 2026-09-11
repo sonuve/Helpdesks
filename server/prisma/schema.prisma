@@ -31,6 +31,7 @@ model User {
   deletedAt     DateTime?
   sessions      Session[]
   accounts      Account[]
+  assignedTickets Ticket[] @relation("TicketAssignee")
 
   @@unique([email])
   @@map("user")
@@ -115,6 +116,13 @@ model Ticket {
   subject        String
   body           String
   requesterEmail String
+  // Nullable, no default: unassigned until a human (or, later, routing
+  // logic) claims it. onDelete: SetNull rather than Cascade/Restrict — an
+  // assignee going away shouldn't delete or block deleting the ticket, and
+  // User rows are soft-deleted anyway (never actually removed), but the FK
+  // constraint still needs a defined behavior.
+  assignedToId   String?
+  assignedTo     User?           @relation("TicketAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
   createdAt      DateTime
   updatedAt      DateTime
 

@@ -443,35 +443,55 @@ describe("GET /api/tickets", () => {
   });
 });
 
-describe("GET /api/tickets/:id", () => {
+// GET /api/tickets/:id and PATCH /api/tickets/:id/assign share one signed-in
+// session (one sign-in call) rather than one each — see the "as an
+// authenticated user" describe above for why: sign-in shares an IP-keyed
+// rate-limit bucket with every other real sign-in in this file (and
+// server/src/routes/users.test.ts) across a single `bun test` run.
+describe("a single-ticket-scoped session (GET /:id, PATCH /:id/assign)", () => {
   const agent = supertest.agent(app);
   const userEmail = `server-test-ticket-detail-${Date.now()}@example.com`;
   const userPassword = "Server-Test-Passw0rd!";
   let userId: string;
+  let assigneeId: string;
   let ticketId: number;
 
   beforeAll(async () => {
     userId = crypto.randomUUID();
+    assigneeId = crypto.randomUUID();
     const now = new Date();
-    await prisma.user.create({
+
+    await prisma.user.createMany({
+      data: [
+        {
+          id: userId,
+          name: "Server Test Detail Agent",
+          email: userEmail,
+          emailVerified: true,
+          role: Role.AGENT,
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          id: assigneeId,
+          name: "Server Test Assignee",
+          email: `server-test-assignee-${Date.now()}@example.com`,
+          emailVerified: true,
+          role: Role.AGENT,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    });
+    await prisma.account.create({
       data: {
-        id: userId,
-        name: "Server Test Detail Agent",
-        email: userEmail,
-        emailVerified: true,
-        role: Role.AGENT,
+        id: crypto.randomUUID(),
+        userId,
+        accountId: userId,
+        providerId: "credential",
+        password: await hashPassword(userPassword),
         createdAt: now,
         updatedAt: now,
-        accounts: {
-          create: {
-            id: crypto.randomUUID(),
-            accountId: userId,
-            providerId: "credential",
-            password: await hashPassword(userPassword),
-            createdAt: now,
-            updatedAt: now,
-          },
-        },
       },
     });
 
@@ -500,38 +520,102 @@ describe("GET /api/tickets/:id", () => {
     await prisma.ticket.delete({ where: { id: ticketId } });
     await prisma.session.deleteMany({ where: { userId } });
     await prisma.account.deleteMany({ where: { userId } });
-    await prisma.user.delete({ where: { id: userId } });
+    await prisma.user.deleteMany({ where: { id: { in: [userId, assigneeId] } } });
   });
 
-  test("401s when unauthenticated", async () => {
-    const res = await request.get(`/api/tickets/${ticketId}`);
-    expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: "Unauthorized" });
-  });
+  describe("GET /api/tickets/:id", () => {
+    test("401s when unauthenticated", async () => {
+      const res = await request.get(`/api/tickets/${ticketId}`);
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ error: "Unauthorized" });
+    });
 
-  test("returns the full ticket, including body, for an authenticated user", async () => {
-    const res = await agent.get(`/api/tickets/${ticketId}`);
+    test("returns the full ticket, including body, for an authenticated user", async () => {
+      const res = await agent.get(`/api/tickets/${ticketId}`);
 
-    expect(res.status).toBe(200);
-    expect(res.body.ticket).toMatchObject({
-      id: ticketId,
-      subject: "Detail fixture",
-      status: "OPEN",
-      category: "TECHNICAL_QUESTION",
-      body: "Full ticket body for the detail page.",
-      requesterEmail: "detail-fixture@example.com",
+      expect(res.status).toBe(200);
+      expect(res.body.ticket).toMatchObject({
+        id: ticketId,
+        subject: "Detail fixture",
+        status: "OPEN",
+        category: "TECHNICAL_QUESTION",
+        body: "Full ticket body for the detail page.",
+        requesterEmail: "detail-fixture@example.com",
+        assignedTo: null,
+      });
+    });
+
+    test("404s for a ticket id that doesn't exist", async () => {
+      const res = await agent.get("/api/tickets/999999999");
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "Ticket not found" });
+    });
+
+    test("400s for a non-numeric id", async () => {
+      const res = await agent.get("/api/tickets/not-a-number");
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ error: "Invalid ticket id" });
     });
   });
 
-  test("404s for a ticket id that doesn't exist", async () => {
-    const res = await agent.get("/api/tickets/999999999");
-    expect(res.status).toBe(404);
-    expect(res.body).toEqual({ error: "Ticket not found" });
-  });
+  describe("PATCH /api/tickets/:id/assign", () => {
+    test("401s when unauthenticated", async () => {
+      const res = await request
+        .patch(`/api/tickets/${ticketId}/assign`)
+        .send({ assignedToId: null });
+      expect(res.status).toBe(401);
+    });
 
-  test("400s for a non-numeric id", async () => {
-    const res = await agent.get("/api/tickets/not-a-number");
-    expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: "Invalid ticket id" });
+    test("assigns the ticket and returns the populated assignedTo", async () => {
+      const res = await agent
+        .patch(`/api/tickets/${ticketId}/assign`)
+        .send({ assignedToId: assigneeId });
+
+      expect(res.status).toBe(200);
+      expect(res.body.ticket.assignedToId).toBe(assigneeId);
+      expect(res.body.ticket.assignedTo).toMatchObject({
+        id: assigneeId,
+        name: "Server Test Assignee",
+      });
+    });
+
+    test("unassigns when assignedToId is null", async () => {
+      await agent.patch(`/api/tickets/${ticketId}/assign`).send({ assignedToId: assigneeId });
+
+      const res = await agent
+        .patch(`/api/tickets/${ticketId}/assign`)
+        .send({ assignedToId: null });
+
+      expect(res.status).toBe(200);
+      expect(res.body.ticket.assignedToId).toBeNull();
+      expect(res.body.ticket.assignedTo).toBeNull();
+    });
+
+    test("404s when the assignee doesn't exist", async () => {
+      const res = await agent
+        .patch(`/api/tickets/${ticketId}/assign`)
+        .send({ assignedToId: crypto.randomUUID() });
+
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "Assignee not found" });
+    });
+
+    test("404s when the ticket doesn't exist", async () => {
+      const res = await agent
+        .patch("/api/tickets/999999999/assign")
+        .send({ assignedToId: null });
+
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "Ticket not found" });
+    });
+
+    test("400s for a non-numeric ticket id", async () => {
+      const res = await agent
+        .patch("/api/tickets/not-a-number/assign")
+        .send({ assignedToId: null });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ error: "Invalid ticket id" });
+    });
   });
 });

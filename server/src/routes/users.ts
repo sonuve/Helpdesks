@@ -25,6 +25,26 @@ usersRouter.get("/api/me", apiLimiter, (req: Request, res: Response) => {
   res.json({ user: req.user });
 });
 
+// Unlike GET /api/users below, this isn't ADMIN-only — any authenticated
+// user needs it to populate a ticket's "assign to" picker (per
+// project-scope.md's "Agent permissions" decision, regular agents can
+// reassign tickets too), so it only requires req.user and returns a
+// deliberately minimal shape (no role/emailVerified/createdAt) rather than
+// the admin-facing user list.
+usersRouter.get("/api/users/assignable", apiLimiter, async (req: Request, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const users = await prisma.user.findMany({
+    where: { deletedAt: null },
+    select: { id: true, name: true, email: true },
+    orderBy: { name: "asc" },
+  });
+
+  res.json({ users });
+});
+
 usersRouter.get("/api/users", apiLimiter, async (req: Request, res: Response) => {
   if (!req.user) {
     return res.status(401).json({ error: "Unauthorized" });

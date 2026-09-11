@@ -95,6 +95,7 @@ ticketsRouter.get("/api/tickets", apiLimiter, async (req: Request, res: Response
   const [tickets, total] = await Promise.all([
     prisma.ticket.findMany({
       where,
+      include: { assignedTo: { select: { id: true, name: true, email: true } } },
       orderBy: { [sortBy]: sortOrder },
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -119,10 +120,60 @@ ticketsRouter.get("/api/tickets/:id", apiLimiter, async (req: Request, res: Resp
     return res.status(400).json({ error: "Invalid ticket id" });
   }
 
-  const ticket = await prisma.ticket.findUnique({ where: { id: id.data } });
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: id.data },
+    include: { assignedTo: { select: { id: true, name: true, email: true } } },
+  });
   if (!ticket) {
     return res.status(404).json({ error: "Ticket not found" });
   }
+
+  res.json({ ticket });
+});
+
+// A single trivial field with no real form behind it (the client drives it
+// straight from a Select's onChange, not a validated multi-field form), so
+// per CLAUDE.md's data-validation convention this stays local rather than
+// moving to `core`. `null` means "unassign."
+const assignTicketSchema = z.object({ assignedToId: z.string().nullable() });
+
+// Same access rule as the other ticket endpoints: any authenticated user,
+// not just admins — project-scope.md's "Agent permissions" decision gives
+// regular agents full reassignment rights, not just the current assignee
+// or an admin.
+ticketsRouter.patch("/api/tickets/:id/assign", apiLimiter, async (req: Request, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const id = z.coerce.number().int().positive().safeParse(req.params.id);
+  if (!id.success) {
+    return res.status(400).json({ error: "Invalid ticket id" });
+  }
+
+  const parsed = assignTicketSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input" });
+  }
+  const { assignedToId } = parsed.data;
+
+  const existing = await prisma.ticket.findUnique({ where: { id: id.data } });
+  if (!existing) {
+    return res.status(404).json({ error: "Ticket not found" });
+  }
+
+  if (assignedToId) {
+    const assignee = await prisma.user.findUnique({ where: { id: assignedToId } });
+    if (!assignee || assignee.deletedAt) {
+      return res.status(404).json({ error: "Assignee not found" });
+    }
+  }
+
+  const ticket = await prisma.ticket.update({
+    where: { id: id.data },
+    data: { assignedToId, updatedAt: new Date() },
+    include: { assignedTo: { select: { id: true, name: true, email: true } } },
+  });
 
   res.json({ ticket });
 });

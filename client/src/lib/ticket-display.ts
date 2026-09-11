@@ -1,5 +1,7 @@
 import { TicketCategory, TicketStatus } from "core";
 
+export type TicketAssignee = { id: string; name: string; email: string };
+
 // Shared between TicketsTable.tsx (list) and TicketDetailPage.tsx (single
 // ticket) so the two views can't drift apart on how a status/category
 // renders.
@@ -10,6 +12,7 @@ export type Ticket = {
   subject: string;
   body: string;
   requesterEmail: string;
+  assignedTo: TicketAssignee | null;
   createdAt: string;
   updatedAt: string;
 };

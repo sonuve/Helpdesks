@@ -102,6 +102,19 @@ const columns: ColumnDef<TicketListItem>[] = [
       ),
   },
   {
+    // Not sortable — assignedTo isn't in GET /api/tickets' sortBy
+    // allow-list, so this is a plain header (no SortableHeader) rather
+    // than one that looks clickable but does nothing.
+    id: "assignedTo",
+    header: "Assignee",
+    cell: ({ row }) =>
+      row.original.assignedTo ? (
+        row.original.assignedTo.name
+      ) : (
+        <span className="text-muted-foreground">Unassigned</span>
+      ),
+  },
+  {
     accessorKey: "createdAt",
     header: ({ column }) => <SortableHeader label="Created" column={column} />,
     cell: ({ row }) => new Date(row.original.createdAt).toLocaleString(),

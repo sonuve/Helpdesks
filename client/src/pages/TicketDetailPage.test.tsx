@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import axios from "axios";
 import { TicketCategory, TicketStatus } from "core";
 import { Route, Routes } from "react-router-dom";
@@ -16,13 +16,31 @@ const TICKET = {
   subject: "Refund request",
   body: "I would like a refund for my last order.",
   requesterEmail: "customer@example.com",
+  assignedTo: null,
   createdAt: "2026-02-20T00:00:00.000Z",
   updatedAt: "2026-02-20T00:00:00.000Z",
 };
 
+const ASSIGNABLE_USERS = [
+  { id: "u1", name: "Agent", email: "agent@example.com" },
+  { id: "u2", name: "Admin", email: "admin@example.com" },
+];
+
 beforeEach(() => {
   mockedAxios.get.mockReset();
+  mockedAxios.patch.mockReset();
 });
+
+// GET /api/tickets/:id and GET /api/users/assignable both fire on render —
+// dispatch each mocked response by URL rather than a single blanket
+// mockResolvedValue, which can't tell the two apart.
+function mockGet(ticket: unknown = TICKET, users: unknown = ASSIGNABLE_USERS) {
+  mockedAxios.get.mockImplementation(async (url: string) => {
+    if (url.startsWith("/api/tickets/")) return { data: { ticket } };
+    if (url === "/api/users/assignable") return { data: { users } };
+    throw new Error(`Unexpected GET ${url}`);
+  });
+}
 
 function renderDetailPage(id: string | number) {
   return renderWithQuery(
@@ -43,7 +61,7 @@ describe("TicketDetailPage", () => {
   });
 
   it("requests the ticket by the :id route param", async () => {
-    mockedAxios.get.mockResolvedValue({ data: { ticket: TICKET } });
+    mockGet();
 
     renderDetailPage(TICKET.id);
 
@@ -52,7 +70,7 @@ describe("TicketDetailPage", () => {
   });
 
   it("renders the ticket's details, including its body", async () => {
-    mockedAxios.get.mockResolvedValue({ data: { ticket: TICKET } });
+    mockGet();
 
     renderDetailPage(TICKET.id);
 
@@ -66,7 +84,7 @@ describe("TicketDetailPage", () => {
   });
 
   it("shows 'Unclassified' for a ticket with no category", async () => {
-    mockedAxios.get.mockResolvedValue({ data: { ticket: { ...TICKET, category: null } } });
+    mockGet({ ...TICKET, category: null });
 
     renderDetailPage(TICKET.id);
 
@@ -84,7 +102,7 @@ describe("TicketDetailPage", () => {
   });
 
   it("has a link back to the tickets list", async () => {
-    mockedAxios.get.mockResolvedValue({ data: { ticket: TICKET } });
+    mockGet();
 
     renderDetailPage(TICKET.id);
     await screen.findByText(/Refund request/);
@@ -92,6 +110,68 @@ describe("TicketDetailPage", () => {
     expect(screen.getByRole("link", { name: /Back to tickets/ })).toHaveAttribute(
       "href",
       "/tickets",
+    );
+  });
+
+  it("shows 'Unassigned' and lists the assignable users as options", async () => {
+    mockGet();
+
+    renderDetailPage(TICKET.id);
+    await screen.findByText(/Refund request/);
+
+    expect(screen.getByRole("combobox", { name: "Assigned to" })).toHaveTextContent("Unassigned");
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Assigned to" }));
+    expect(await screen.findByRole("option", { name: "Agent" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Admin" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Unassigned" })).toBeInTheDocument();
+  });
+
+  it("shows the current assignee's name when one is set", async () => {
+    mockGet({ ...TICKET, assignedTo: ASSIGNABLE_USERS[0] });
+
+    renderDetailPage(TICKET.id);
+    await screen.findByText(/Refund request/);
+
+    expect(screen.getByRole("combobox", { name: "Assigned to" })).toHaveTextContent("Agent");
+  });
+
+  it("assigns the ticket when a new assignee is picked", async () => {
+    mockGet();
+    mockedAxios.patch.mockResolvedValue({
+      data: { ticket: { ...TICKET, assignedTo: ASSIGNABLE_USERS[0] } },
+    });
+
+    renderDetailPage(TICKET.id);
+    await screen.findByText(/Refund request/);
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Assigned to" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Agent" }));
+
+    // The mutation's request fires asynchronously (it's not mutateAsync
+    // awaited inline), so the assertion needs to wait for it too — see
+    // EditUserDialog.test.tsx's equivalent submit-and-check-patch tests.
+    await waitFor(() =>
+      expect(mockedAxios.patch).toHaveBeenCalledWith(`/api/tickets/${TICKET.id}/assign`, {
+        assignedToId: "u1",
+      }),
+    );
+  });
+
+  it("unassigns the ticket when 'Unassigned' is picked", async () => {
+    mockGet({ ...TICKET, assignedTo: ASSIGNABLE_USERS[0] });
+    mockedAxios.patch.mockResolvedValue({ data: { ticket: { ...TICKET, assignedTo: null } } });
+
+    renderDetailPage(TICKET.id);
+    await screen.findByText(/Refund request/);
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Assigned to" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Unassigned" }));
+
+    await waitFor(() =>
+      expect(mockedAxios.patch).toHaveBeenCalledWith(`/api/tickets/${TICKET.id}/assign`, {
+        assignedToId: null,
+      }),
     );
   });
 });

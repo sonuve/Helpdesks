@@ -17,6 +17,7 @@ const NEWER_TICKET = {
   category: null,
   subject: "Cannot log in",
   requesterEmail: "newer@example.com",
+  assignedTo: null,
   createdAt: "2026-02-20T00:00:00.000Z",
 };
 
@@ -26,6 +27,7 @@ const OLDER_TICKET = {
   category: TicketCategory.REFUND_REQUEST,
   subject: "Refund request",
   requesterEmail: "older@example.com",
+  assignedTo: { id: "u1", name: "Agent", email: "agent@example.com" },
   createdAt: "2026-01-15T00:00:00.000Z",
 };
 
@@ -82,6 +84,16 @@ describe("TicketsTable", () => {
     expect(screen.getByText("older@example.com")).toBeInTheDocument();
     expect(screen.getByText("RESOLVED")).toBeInTheDocument();
     expect(screen.getByText("Refund Request")).toBeInTheDocument();
+  });
+
+  it("shows the assignee's name, or 'Unassigned' when there is none", async () => {
+    mockedAxios.get.mockResolvedValue(ticketsResponse([NEWER_TICKET, OLDER_TICKET]));
+
+    renderWithQuery(<TicketsTable />);
+    const rows = await screen.findAllByRole("row");
+
+    expect(rows[1]).toHaveTextContent("Unassigned");
+    expect(rows[2]).toHaveTextContent("Agent");
   });
 
   it("links each row's subject to that ticket's detail page", async () => {
