@@ -77,6 +77,8 @@ Express 5 automatically forwards a rejected promise from an `async` route handle
 
 Only reach for `try/catch` when you need to turn a specific failure into a specific response, rather than the default error handling. `GET /api/health` is the example: it catches so it can report `503 { status: "error", database: "unreachable" }` instead of a generic 500, since the probe's whole purpose is distinguishing "DB unreachable" from "server down."
 
+On the client, every mutation's `onError` needs to pull that server-provided `{ error: string }` message out of a failed request, falling back to a generic message for anything else (a network failure, an unexpected response shape). Use `getErrorMessage(error, fallback)` from `client/src/lib/api-error.ts` for this rather than inlining `axios.isAxiosError(error) && error.response?.data?.error` again — see its usage in `UserForm.tsx`, `DeleteUserDialog.tsx`, and `TicketDetailPage.tsx`'s reply form.
+
 ### Rate limiting
 
 Two layers, both IP-keyed:

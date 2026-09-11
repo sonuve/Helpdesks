@@ -11,6 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog.tsx";
+import { getErrorMessage } from "@/lib/api-error.ts";
 
 type DeleteUserDialogProps = {
   user: { id: string; name: string } | null;
@@ -56,10 +57,7 @@ function DeleteUserDialogBody({
       onDeleted();
     },
     onError: (mutationError) => {
-      const message =
-        (axios.isAxiosError(mutationError) && mutationError.response?.data?.error) ||
-        "Could not delete user. Please try again.";
-      setError(message);
+      setError(getErrorMessage(mutationError, "Could not delete user. Please try again."));
     },
   });
 

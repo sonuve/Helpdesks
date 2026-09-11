@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select.tsx";
+import { getErrorMessage } from "@/lib/api-error.ts";
 
 // `updateUserSchema` (blank-password-allowed) infers to the same shape as
 // `CreateUserInput`, so one type covers both modes' form values.
@@ -57,10 +58,12 @@ export function UserForm(props: UserFormProps) {
       onSuccess();
     },
     onError: (mutationError) => {
-      const message =
-        (axios.isAxiosError(mutationError) && mutationError.response?.data?.error) ||
-        `Could not ${mode === "create" ? "create" : "update"} user. Please try again.`;
-      setError(message);
+      setError(
+        getErrorMessage(
+          mutationError,
+          `Could not ${mode === "create" ? "create" : "update"} user. Please try again.`,
+        ),
+      );
     },
   });
 
