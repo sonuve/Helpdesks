@@ -134,8 +134,12 @@ ticketsRouter.get("/api/tickets/:id", apiLimiter, async (req: Request, res: Resp
 // A single trivial field with no real form behind it (the client drives it
 // straight from a Select's onChange, not a validated multi-field form), so
 // per CLAUDE.md's data-validation convention this stays local rather than
-// moving to `core`. `null` means "unassign."
-const assignTicketSchema = z.object({ assignedToId: z.string().nullable() });
+// moving to `core`. `null` means "unassign" — `min(1)` rejects `""` as a
+// distinct, meaningless third value (not a real user id, and not the
+// explicit `null` this endpoint requires for unassigning).
+const assignTicketSchema = z.object({
+  assignedToId: z.string().min(1, "assignedToId must not be empty").nullable(),
+});
 
 // Same access rule as the other ticket endpoints: any authenticated user,
 // not just admins — project-scope.md's "Agent permissions" decision gives
@@ -162,7 +166,12 @@ ticketsRouter.patch("/api/tickets/:id/assign", apiLimiter, async (req: Request, 
     return res.status(404).json({ error: "Ticket not found" });
   }
 
-  if (assignedToId) {
+  // `!== null` rather than a truthy check — schema validation already
+  // rejects `""`, but this must still hold even if that changes, since a
+  // truthy check would let an empty string skip the existence lookup and
+  // reach Prisma, where it would fail as an opaque FK-constraint 500
+  // instead of a clean 404.
+  if (assignedToId !== null) {
     const assignee = await prisma.user.findUnique({ where: { id: assignedToId } });
     if (!assignee || assignee.deletedAt) {
       return res.status(404).json({ error: "Assignee not found" });

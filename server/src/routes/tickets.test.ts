@@ -454,11 +454,13 @@ describe("a single-ticket-scoped session (GET /:id, PATCH /:id/assign)", () => {
   const userPassword = "Server-Test-Passw0rd!";
   let userId: string;
   let assigneeId: string;
+  let deletedAssigneeId: string;
   let ticketId: number;
 
   beforeAll(async () => {
     userId = crypto.randomUUID();
     assigneeId = crypto.randomUUID();
+    deletedAssigneeId = crypto.randomUUID();
     const now = new Date();
 
     await prisma.user.createMany({
@@ -480,6 +482,19 @@ describe("a single-ticket-scoped session (GET /:id, PATCH /:id/assign)", () => {
           role: Role.AGENT,
           createdAt: now,
           updatedAt: now,
+        },
+        {
+          // Exists, but soft-deleted — must be rejected as an assignee the
+          // same way a nonexistent id is, not treated as "valid" just
+          // because the row is still there.
+          id: deletedAssigneeId,
+          name: "Server Test Deleted Assignee",
+          email: `server-test-deleted-assignee-${Date.now()}@example.com`,
+          emailVerified: true,
+          role: Role.AGENT,
+          createdAt: now,
+          updatedAt: now,
+          deletedAt: now,
         },
       ],
     });
@@ -520,7 +535,7 @@ describe("a single-ticket-scoped session (GET /:id, PATCH /:id/assign)", () => {
     await prisma.ticket.delete({ where: { id: ticketId } });
     await prisma.session.deleteMany({ where: { userId } });
     await prisma.account.deleteMany({ where: { userId } });
-    await prisma.user.deleteMany({ where: { id: { in: [userId, assigneeId] } } });
+    await prisma.user.deleteMany({ where: { id: { in: [userId, assigneeId, deletedAssigneeId] } } });
   });
 
   describe("GET /api/tickets/:id", () => {
@@ -598,6 +613,29 @@ describe("a single-ticket-scoped session (GET /:id, PATCH /:id/assign)", () => {
 
       expect(res.status).toBe(404);
       expect(res.body).toEqual({ error: "Assignee not found" });
+    });
+
+    test("404s when the assignee exists but is soft-deleted", async () => {
+      const res = await agent
+        .patch(`/api/tickets/${ticketId}/assign`)
+        .send({ assignedToId: deletedAssigneeId });
+
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "Assignee not found" });
+    });
+
+    test("400s for an empty-string assignedToId, rather than passing it through", async () => {
+      const res = await agent
+        .patch(`/api/tickets/${ticketId}/assign`)
+        .send({ assignedToId: "" });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ error: "assignedToId must not be empty" });
+    });
+
+    test("400s when assignedToId is omitted entirely", async () => {
+      const res = await agent.patch(`/api/tickets/${ticketId}/assign`).send({});
+      expect(res.status).toBe(400);
     });
 
     test("404s when the ticket doesn't exist", async () => {
