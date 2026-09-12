@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration } from "./ticket-display.ts";
+import { formatChartDate, formatDuration } from "./ticket-display.ts";
 
 describe("formatDuration", () => {
   it("renders under an hour as minutes only", () => {
@@ -24,5 +24,21 @@ describe("formatDuration", () => {
 
   it("rounds to the nearest minute", () => {
     expect(formatDuration(89_500)).toBe("1m"); // 1 minute, 29.5 seconds
+  });
+});
+
+describe("formatChartDate", () => {
+  it("renders a single-digit day with no leading zero", () => {
+    expect(formatChartDate("2026-01-09")).toBe("Jan 9");
+  });
+
+  it("renders a double-digit day as-is", () => {
+    expect(formatChartDate("2026-12-25")).toBe("Dec 25");
+  });
+
+  it("treats the date as UTC, not the local timezone", () => {
+    // A date string of exactly midnight UTC could shift to the previous
+    // day in a timezone behind UTC if this weren't handled explicitly.
+    expect(formatChartDate("2026-03-01")).toBe("Mar 1");
   });
 });

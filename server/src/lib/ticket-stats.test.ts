@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { computeAverageResolutionTimeMs, computeResolvedByAiPercent } from "./ticket-stats.js";
+import {
+  computeAverageResolutionTimeMs,
+  computeResolvedByAiPercent,
+  computeTicketsPerDay,
+} from "./ticket-stats.js";
 
 describe("computeResolvedByAiPercent", () => {
   test("returns 0 when there are no tickets at all, rather than NaN", () => {
@@ -64,5 +68,56 @@ describe("computeAverageResolutionTimeMs", () => {
       { createdAt: new Date("2026-01-01T00:00:00Z"), resolvedAt: null },
     ]);
     expect(result).toBe(2 * 60 * 60 * 1000);
+  });
+});
+
+describe("computeTicketsPerDay", () => {
+  // Fixed reference point rather than the real current time, so every
+  // test here is deterministic regardless of when it actually runs.
+  const NOW = new Date("2026-01-10T15:30:00Z");
+
+  test("returns one zero-count entry per day when there are no tickets", () => {
+    const result = computeTicketsPerDay([], 5, NOW);
+
+    expect(result).toEqual([
+      { date: "2026-01-06", count: 0 },
+      { date: "2026-01-07", count: 0 },
+      { date: "2026-01-08", count: 0 },
+      { date: "2026-01-09", count: 0 },
+      { date: "2026-01-10", count: 0 },
+    ]);
+  });
+
+  test("orders days oldest first, ending on now's own calendar day", () => {
+    const result = computeTicketsPerDay([], 3, NOW);
+    expect(result.map((d) => d.date)).toEqual(["2026-01-08", "2026-01-09", "2026-01-10"]);
+  });
+
+  test("counts multiple tickets created on the same UTC day together", () => {
+    const result = computeTicketsPerDay(
+      [
+        { createdAt: new Date("2026-01-09T01:00:00Z") },
+        { createdAt: new Date("2026-01-09T23:59:00Z") },
+        { createdAt: new Date("2026-01-10T00:00:00Z") },
+      ],
+      3,
+      NOW,
+    );
+
+    expect(result).toEqual([
+      { date: "2026-01-08", count: 0 },
+      { date: "2026-01-09", count: 2 },
+      { date: "2026-01-10", count: 1 },
+    ]);
+  });
+
+  test("excludes a ticket created outside the requested window", () => {
+    const result = computeTicketsPerDay(
+      [{ createdAt: new Date("2026-01-01T00:00:00Z") }], // 9 days before the 3-day window starts
+      3,
+      NOW,
+    );
+
+    expect(result.every((d) => d.count === 0)).toBe(true);
   });
 });

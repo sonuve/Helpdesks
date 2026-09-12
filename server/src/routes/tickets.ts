@@ -5,7 +5,11 @@ import { generateReply, polishReply } from "../lib/reply-drafting.js";
 import { summarizeTicket } from "../lib/ticket-analysis.js";
 import { prisma } from "../lib/prisma.js";
 import { enqueueAutoResolveTicket, enqueueClassifyTicket } from "../lib/queue.js";
-import { computeAverageResolutionTimeMs, computeResolvedByAiPercent } from "../lib/ticket-stats.js";
+import {
+  computeAverageResolutionTimeMs,
+  computeResolvedByAiPercent,
+  computeTicketsPerDay,
+} from "../lib/ticket-stats.js";
 import { apiLimiter } from "../middleware/rate-limit.js";
 import type { Prisma } from "../generated/prisma/client.js";
 // Prisma's own generated TicketStatus/TicketCategory, not core's
@@ -129,21 +133,38 @@ ticketsRouter.get("/api/tickets/stats", apiLimiter, async (req: Request, res: Re
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const [totalTickets, openTickets, resolvedByAiCount, resolvedTickets] = await Promise.all([
-    prisma.ticket.count(),
-    prisma.ticket.count({ where: { status: TicketStatus.OPEN } }),
-    prisma.ticket.count({ where: { resolvedByAi: true } }),
-    // Only createdAt/resolvedAt are needed to compute the average, not the
-    // whole row — resolvedAt (not updatedAt) is what actually marks when a
-    // ticket left OPEN, see its comment in schema.prisma. The `where`
-    // narrows the query for efficiency; computeAverageResolutionTimeMs
-    // (lib/ticket-stats.ts) still filters resolvedAt itself too, so it
-    // stays correct even called with unfiltered rows elsewhere.
-    prisma.ticket.findMany({
-      where: { resolvedAt: { not: null } },
-      select: { createdAt: true, resolvedAt: true },
-    }),
-  ]);
+  // Start of the UTC calendar day 29 days ago — together with "today"
+  // (day 0), that's the 30-day window computeTicketsPerDay below buckets
+  // into. Computed from one `now` (not a fresh `new Date()` in each call)
+  // so the query's cutoff and the bucketing both agree on the same
+  // instant.
+  const now = new Date();
+  const ticketsPerDayWindowStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 29),
+  );
+
+  const [totalTickets, openTickets, resolvedByAiCount, resolvedTickets, recentTickets] =
+    await Promise.all([
+      prisma.ticket.count(),
+      prisma.ticket.count({ where: { status: TicketStatus.OPEN } }),
+      prisma.ticket.count({ where: { resolvedByAi: true } }),
+      // Only createdAt/resolvedAt are needed to compute the average, not the
+      // whole row — resolvedAt (not updatedAt) is what actually marks when a
+      // ticket left OPEN, see its comment in schema.prisma. The `where`
+      // narrows the query for efficiency; computeAverageResolutionTimeMs
+      // (lib/ticket-stats.ts) still filters resolvedAt itself too, so it
+      // stays correct even called with unfiltered rows elsewhere.
+      prisma.ticket.findMany({
+        where: { resolvedAt: { not: null } },
+        select: { createdAt: true, resolvedAt: true },
+      }),
+      // Only createdAt is needed to bucket by day — narrowed to the
+      // window itself so this doesn't fetch the whole table as it grows.
+      prisma.ticket.findMany({
+        where: { createdAt: { gte: ticketsPerDayWindowStart } },
+        select: { createdAt: true },
+      }),
+    ]);
 
   res.json({
     totalTickets,
@@ -151,6 +172,7 @@ ticketsRouter.get("/api/tickets/stats", apiLimiter, async (req: Request, res: Re
     resolvedByAiCount,
     resolvedByAiPercent: computeResolvedByAiPercent(resolvedByAiCount, totalTickets),
     averageResolutionTimeMs: computeAverageResolutionTimeMs(resolvedTickets),
+    ticketsPerDay: computeTicketsPerDay(recentTickets, 30, now),
   });
 });
 

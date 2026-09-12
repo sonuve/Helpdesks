@@ -37,3 +37,42 @@ export function computeAverageResolutionTimeMs(
   );
   return totalMs / resolved.length;
 }
+
+// "YYYY-MM-DD", UTC — the wire format for a calendar day throughout this
+// function, matching how the rest of the codebase treats date-only values
+// (routes/tickets.ts's createdFrom/createdTo filtering parses the same
+// plain YYYY-MM-DD string as UTC midnight).
+function toUtcDateKey(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+// Buckets `tickets` by the UTC calendar day they were created, returning
+// exactly `days` entries — the most recent `days` calendar days including
+// `now`'s own day, oldest first (matching every other "oldest first"
+// ordering in this codebase, e.g. a reply thread) — so the dashboard's bar
+// chart always has a fixed-width, zero-filled x-axis instead of skipping
+// days with no tickets. `now` defaults to the real current time but takes
+// an explicit override so this stays a pure, deterministically-testable
+// function rather than one whose output depends on when the test happens
+// to run.
+export function computeTicketsPerDay(
+  tickets: { createdAt: Date }[],
+  days: number,
+  now: Date = new Date(),
+): { date: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const ticket of tickets) {
+    const key = toUtcDateKey(ticket.createdAt);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  const result: { date: string; count: number }[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const date = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i),
+    );
+    const key = toUtcDateKey(date);
+    result.push({ date: key, count: counts.get(key) ?? 0 });
+  }
+  return result;
+}

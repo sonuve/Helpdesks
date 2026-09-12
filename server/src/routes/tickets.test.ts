@@ -760,6 +760,15 @@ describe("a single-ticket-scoped session (GET /:id, PATCH /:id/assign)", () => {
           (typeof before.body.averageResolutionTimeMs === "number" &&
             before.body.averageResolutionTimeMs >= 0),
       ).toBe(true);
+      // Fixed-width, zero-filled 30-day window — computeTicketsPerDay's
+      // own arithmetic (bucketing, ordering, the zero-fill) is covered by
+      // lib/ticket-stats.test.ts's pure unit tests; this just checks the
+      // route actually wires it in with the expected shape.
+      expect(before.body.ticketsPerDay).toHaveLength(30);
+      for (const day of before.body.ticketsPerDay as { date: string; count: number }[]) {
+        expect(day.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        expect(typeof day.count).toBe("number");
+      }
 
       const now = new Date();
       const extra = await prisma.ticket.create({
@@ -776,6 +785,11 @@ describe("a single-ticket-scoped session (GET /:id, PATCH /:id/assign)", () => {
         const after = await agent.get("/api/tickets/stats");
         expect(after.body.totalTickets).toBeGreaterThanOrEqual(before.body.totalTickets + 1);
         expect(after.body.openTickets).toBeGreaterThanOrEqual(before.body.openTickets + 1);
+        // Today is always the last (most recent) bucket.
+        const beforeToday = before.body.ticketsPerDay.at(-1);
+        const afterToday = after.body.ticketsPerDay.at(-1);
+        expect(afterToday.date).toBe(beforeToday.date);
+        expect(afterToday.count).toBeGreaterThanOrEqual(beforeToday.count + 1);
       } finally {
         await prisma.ticket.delete({ where: { id: extra.id } });
       }

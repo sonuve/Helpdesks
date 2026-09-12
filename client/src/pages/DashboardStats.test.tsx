@@ -14,6 +14,7 @@ const STATS: TicketStats = {
   resolvedByAiCount: 7,
   resolvedByAiPercent: 16.7,
   averageResolutionTimeMs: 2 * 60 * 60 * 1000 + 30 * 60 * 1000, // 2h 30m
+  ticketsPerDay: [],
 };
 
 beforeEach(() => {

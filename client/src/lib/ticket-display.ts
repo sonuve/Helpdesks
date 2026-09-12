@@ -78,12 +78,19 @@ export const replySenderTypeBadgeVariant: Record<ReplySenderType, "default" | "s
 // been resolved yet, matching server/src/lib/ticket-stats.ts's
 // computeAverageResolutionTimeMs — "no data" and "resolved instantly" are
 // different things the dashboard should render differently.
+export type TicketsPerDay = { date: string; count: number };
+
 export type TicketStats = {
   totalTickets: number;
   openTickets: number;
   resolvedByAiCount: number;
   resolvedByAiPercent: number;
   averageResolutionTimeMs: number | null;
+  // Fixed-width, 30 entries, oldest first, zero-filled for days with no
+  // tickets — see server/src/lib/ticket-stats.ts's computeTicketsPerDay.
+  // `date` is a plain "YYYY-MM-DD" (UTC calendar day), not an ISO
+  // timestamp.
+  ticketsPerDay: TicketsPerDay[];
 };
 
 // Renders a millisecond duration as a compact, human-readable string (e.g.
@@ -105,4 +112,15 @@ export function formatDuration(ms: number): string {
   const days = Math.floor(totalHours / 24);
   const remainingHours = totalHours % 24;
   return remainingHours === 0 ? `${days}d` : `${days}d ${remainingHours}h`;
+}
+
+// Renders a TicketsPerDay entry's plain "YYYY-MM-DD" as a short label (e.g.
+// "Jan 9") for the tickets-per-day chart's x-axis. Parses/formats in UTC
+// explicitly — the date string is a UTC calendar day (see TicketStats'
+// comment), so doing this in the viewer's local timezone could shift it to
+// the wrong day near midnight.
+export function formatChartDate(dateKey: string): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year!, month! - 1, day!));
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
