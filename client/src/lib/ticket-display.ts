@@ -24,6 +24,13 @@ export type Ticket = {
   requesterEmail: string;
   requesterName: string | null;
   assignedTo: TicketAssignee | null;
+  // True when an AI auto-resolve job (server/src/lib/queue.ts) resolved
+  // this ticket on its own, no agent involved. GET /api/tickets excludes
+  // these from its default response, so they don't show up in
+  // TicketsTable at all unless the Status filter is explicitly set to
+  // Resolved — this field only matters for the badge shown once one is
+  // actually visible (TicketsTable's Status column, TicketDetails.tsx).
+  resolvedByAi: boolean;
   // Only populated on the single-ticket detail response
   // (GET /api/tickets/:id) — same reasoning as `body`, a paginated list
   // response shouldn't carry a field only the detail view needs.

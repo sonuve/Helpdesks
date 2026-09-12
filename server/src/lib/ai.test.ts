@@ -10,8 +10,19 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 const generateTextMock = mock(async (_options: { system: string; prompt: string }) => ({
   text: "  Raw AI output.  ",
 }));
+// Shared between classifyTicket's enum output mode (`object` is a plain
+// string) and evaluateAutoResolution's schema mode (`object` is
+// `{ resolvable, reply }`) — one mock per external dependency, not one
+// per internal caller of it.
+type GenerateObjectResult =
+  | { resolvable: boolean; reply: string | null }
+  | "GENERAL_QUESTION"
+  | "TECHNICAL_QUESTION"
+  | "REFUND_REQUEST";
 const generateObjectMock = mock(
-  async (_options: { system: string; prompt: string; enum: string[] }) => ({
+  async (_options: { system: string; prompt: string; enum?: string[] }): Promise<{
+    object: GenerateObjectResult;
+  }> => ({
     object: "GENERAL_QUESTION",
   }),
 );
@@ -23,7 +34,8 @@ mock.module("ai", () => ({ generateText: generateTextMock, generateObject: gener
 // isolation from @ai-sdk/google's own behavior.
 mock.module("@ai-sdk/google", () => ({ google: () => "mocked-model" }));
 
-const { classifyTicket, generateReply, polishReply, summarizeTicket } = await import("./ai.js");
+const { classifyTicket, evaluateAutoResolution, generateReply, polishReply, summarizeTicket } =
+  await import("./ai.js");
 
 beforeEach(() => {
   generateTextMock.mockClear();
@@ -40,7 +52,9 @@ describe("polishReply", () => {
       agentName: "Jane Doe",
     });
 
-    expect(result).toBe("Raw AI output.\n\nBest regards,\nJane Doe\nhttps://codewithmosh.com");
+    expect(result).toBe(
+      "Raw AI output.\n\nBest regards,\nJane Doe\nCodeWithMosh Support\nhttps://codewithmosh.com",
+    );
   });
 
   test("tells the model to greet the customer by first name only, from a full name", async () => {
@@ -69,6 +83,20 @@ describe("polishReply", () => {
     const [{ system }] = generateTextMock.mock.calls[0]!;
     expect(system).toContain("isn't known");
   });
+
+  test("tells the model to keep a professional, customer-friendly tone and proper paragraph formatting", async () => {
+    await polishReply({
+      ticketSubject: "Subject",
+      ticketBody: "Body",
+      customerName: null,
+      draft: "draft text",
+      agentName: "Jane Doe",
+    });
+
+    const [{ system }] = generateTextMock.mock.calls[0]!;
+    expect(system).toContain("customer-friendly");
+    expect(system).toContain("clear paragraphs");
+  });
 });
 
 describe("generateReply", () => {
@@ -83,7 +111,7 @@ describe("generateReply", () => {
     });
 
     expect(result).toBe(
-      "Another raw output.\n\nBest regards,\nJohn Smith\nhttps://codewithmosh.com",
+      "Another raw output.\n\nBest regards,\nJohn Smith\nCodeWithMosh Support\nhttps://codewithmosh.com",
     );
   });
 
@@ -110,6 +138,19 @@ describe("generateReply", () => {
 
     const [{ system }] = generateTextMock.mock.calls[0]!;
     expect(system).toContain("isn't known");
+  });
+
+  test("tells the model to keep a professional, customer-friendly tone and proper paragraph formatting", async () => {
+    await generateReply({
+      ticketSubject: "Subject",
+      ticketBody: "Body",
+      customerName: null,
+      agentName: "John Smith",
+    });
+
+    const [{ system }] = generateTextMock.mock.calls[0]!;
+    expect(system).toContain("customer-friendly");
+    expect(system).toContain("clear paragraphs");
   });
 });
 
@@ -169,7 +210,7 @@ describe("classifyTicket", () => {
     await classifyTicket({ ticketSubject: "Subject", ticketBody: "Body" });
 
     const [{ enum: categoryEnum }] = generateObjectMock.mock.calls[0]!;
-    expect(categoryEnum.sort()).toEqual(
+    expect(categoryEnum!.sort()).toEqual(
       ["GENERAL_QUESTION", "REFUND_REQUEST", "TECHNICAL_QUESTION"].sort(),
     );
   });
@@ -183,5 +224,90 @@ describe("classifyTicket", () => {
     const [{ prompt }] = generateObjectMock.mock.calls[0]!;
     expect(prompt).toContain("Can't upload files");
     expect(prompt).toContain("My upload keeps failing.");
+  });
+});
+
+describe("evaluateAutoResolution", () => {
+  test("returns resolvable: true with the trimmed, signed reply when the model judges it resolvable", async () => {
+    generateObjectMock.mockResolvedValueOnce({
+      object: { resolvable: true, reply: "  Here's the answer.  " },
+    });
+
+    const result = await evaluateAutoResolution({
+      ticketSubject: "Subject",
+      ticketBody: "Body",
+      customerName: null,
+    });
+
+    expect(result).toEqual({
+      resolvable: true,
+      reply: "Here's the answer.\n\nBest regards,\nAI Assistant\nCodeWithMosh Support\nhttps://codewithmosh.com",
+    });
+  });
+
+  test("returns resolvable: false, reply: null when the model judges it not resolvable", async () => {
+    generateObjectMock.mockResolvedValueOnce({ object: { resolvable: false, reply: null } });
+
+    const result = await evaluateAutoResolution({
+      ticketSubject: "Subject",
+      ticketBody: "Body",
+      customerName: null,
+    });
+
+    expect(result).toEqual({ resolvable: false, reply: null });
+  });
+
+  test("treats resolvable: true with a blank/missing reply as not resolvable, rather than sending nothing", async () => {
+    generateObjectMock.mockResolvedValueOnce({ object: { resolvable: true, reply: "   " } });
+
+    const result = await evaluateAutoResolution({
+      ticketSubject: "Subject",
+      ticketBody: "Body",
+      customerName: null,
+    });
+
+    expect(result).toEqual({ resolvable: false, reply: null });
+  });
+
+  test("tells the model to greet the customer by first name only, from a full name", async () => {
+    generateObjectMock.mockResolvedValueOnce({ object: { resolvable: false, reply: null } });
+
+    await evaluateAutoResolution({
+      ticketSubject: "Subject",
+      ticketBody: "Body",
+      customerName: "Isabella Moreau",
+    });
+
+    const [{ system }] = generateObjectMock.mock.calls[0]!;
+    expect(system).toContain("Isabella");
+    expect(system).not.toContain("Moreau");
+  });
+
+  test("tells the model to default to not-resolvable when unsure, and never to fabricate order/account details", async () => {
+    generateObjectMock.mockResolvedValueOnce({ object: { resolvable: false, reply: null } });
+
+    await evaluateAutoResolution({
+      ticketSubject: "Subject",
+      ticketBody: "Body",
+      customerName: null,
+    });
+
+    const [{ system }] = generateObjectMock.mock.calls[0]!;
+    expect(system).toContain("not resolvable");
+    expect(system).toContain("no access to the customer's account");
+  });
+
+  test("tells the model to keep a professional, customer-friendly tone and proper paragraph formatting", async () => {
+    generateObjectMock.mockResolvedValueOnce({ object: { resolvable: false, reply: null } });
+
+    await evaluateAutoResolution({
+      ticketSubject: "Subject",
+      ticketBody: "Body",
+      customerName: null,
+    });
+
+    const [{ system }] = generateObjectMock.mock.calls[0]!;
+    expect(system).toContain("customer-friendly");
+    expect(system).toContain("clear paragraphs");
   });
 });

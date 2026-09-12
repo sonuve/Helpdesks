@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createReplySchema, polishReplySchema } from "core";
 import { generateReply, polishReply, summarizeTicket } from "../lib/ai.js";
 import { prisma } from "../lib/prisma.js";
-import { enqueueClassifyTicket } from "../lib/queue.js";
+import { enqueueAutoResolveTicket, enqueueClassifyTicket } from "../lib/queue.js";
 import { apiLimiter } from "../middleware/rate-limit.js";
 import type { Prisma } from "../generated/prisma/client.js";
 // Prisma's own generated TicketStatus/TicketCategory, not core's
@@ -90,6 +90,14 @@ ticketsRouter.get("/api/tickets", apiLimiter, async (req: Request, res: Response
           },
         }
       : {}),
+    // Tickets an AI auto-resolve job (lib/queue.ts) resolved on its own
+    // are excluded from the default (no explicit status filter) view —
+    // per project-scope.md's "AI autonomy" decision, they shouldn't
+    // clutter the list an agent actually works from. Only when a status
+    // filter is unset: an explicit `status=RESOLVED` (or any other status)
+    // is a deliberate ask and returns them normally — nothing here is
+    // truly invisible, just off by default.
+    ...(status ? {} : { resolvedByAi: false }),
   };
 
   // Pagination happens here as well: the client only ever holds one page
@@ -492,6 +500,10 @@ ticketsRouter.post("/api/tickets", apiLimiter, async (req: Request, res: Respons
   // response's `ticket.category` is still `null`; callers reading the
   // category back need a subsequent GET once the queued job completes.
   await enqueueClassifyTicket(ticket);
+  // Same non-blocking shape, separate job/queue: whether a ticket gets
+  // auto-resolved is independent of its category, so these run as two
+  // parallel jobs rather than one chained pipeline.
+  await enqueueAutoResolveTicket(ticket);
 
   res.status(201).json({ ticket });
 });

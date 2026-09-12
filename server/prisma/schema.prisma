@@ -135,6 +135,16 @@ model Ticket {
   // constraint still needs a defined behavior.
   assignedToId   String?
   assignedTo     User?           @relation("TicketAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  // True when lib/queue.ts's auto-resolve job judged this ticket fully
+  // answerable with no human needed, sent a reply on its own (authored by
+  // a dedicated "AI Assistant" User — see queue.ts's getOrCreateAiAssistantUser,
+  // since TicketReply.authorId still requires a real User), and set status
+  // to RESOLVED itself. Distinct from an agent manually resolving a
+  // ticket — GET /api/tickets excludes resolvedByAi tickets from its
+  // default (no explicit status filter) response so they don't clutter the
+  // list agents actually work from, but an explicit status filter still
+  // returns them; see project-scope.md's "AI autonomy" decision.
+  resolvedByAi   Boolean         @default(false)
   createdAt      DateTime
   updatedAt      DateTime
   replies        TicketReply[]

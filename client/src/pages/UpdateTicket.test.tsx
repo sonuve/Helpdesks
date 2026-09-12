@@ -17,6 +17,7 @@ const TICKET: Ticket = {
   body: "I would like a refund for my last order.",
   requesterEmail: "customer@example.com",
   requesterName: null,
+  resolvedByAi: false,
   assignedTo: null,
   replies: [],
   createdAt: "2026-02-20T00:00:00.000Z",
@@ -47,6 +48,18 @@ describe("UpdateTicket", () => {
     expect(screen.getByRole("combobox", { name: "Category" })).toHaveTextContent(
       "Refund Request",
     );
+  });
+
+  it("shows a 'Resolved by AI' badge only when the ticket was resolvedByAi", () => {
+    renderUpdateTicket({ ...TICKET, resolvedByAi: true });
+
+    expect(screen.getByText("Resolved by AI")).toBeInTheDocument();
+  });
+
+  it("does not show the AI badge for a normally-resolved ticket", () => {
+    renderUpdateTicket({ ...TICKET, status: TicketStatus.RESOLVED, resolvedByAi: false });
+
+    expect(screen.queryByText("Resolved by AI")).not.toBeInTheDocument();
   });
 
   it("shows 'Unclassified' for a ticket with no category", () => {

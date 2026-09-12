@@ -9,7 +9,7 @@ import {
   type PaginationState,
   type SortingState,
 } from "@tanstack/react-table";
-import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpDownIcon, ArrowUpIcon, SparklesIcon } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -94,9 +94,17 @@ const columns: ColumnDef<TicketListItem>[] = [
     accessorKey: "status",
     header: ({ column }) => <SortableHeader label="Status" column={column} />,
     cell: ({ row }) => (
-      <Badge variant={statusBadgeVariant[row.original.status]}>
-        {statusLabels[row.original.status]}
-      </Badge>
+      <div className="flex items-center gap-1.5">
+        <Badge variant={statusBadgeVariant[row.original.status]}>
+          {statusLabels[row.original.status]}
+        </Badge>
+        {row.original.resolvedByAi && (
+          <Badge variant="outline" className="gap-1">
+            <SparklesIcon className="size-3" />
+            AI
+          </Badge>
+        )}
+      </div>
     ),
   },
   {

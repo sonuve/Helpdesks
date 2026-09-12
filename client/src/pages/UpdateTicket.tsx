@@ -1,6 +1,8 @@
 import axios from "axios";
 import { TicketCategory, TicketStatus } from "core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { SparklesIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge.tsx";
 import {
   Select,
   SelectContent,
@@ -88,6 +90,12 @@ export function UpdateTicket({
             <SelectItem value={TicketStatus.CLOSED}>Closed</SelectItem>
           </SelectContent>
         </Select>
+        {ticket.resolvedByAi && (
+          <Badge variant="outline" className="w-fit gap-1">
+            <SparklesIcon className="size-3" />
+            Resolved by AI
+          </Badge>
+        )}
       </SidebarField>
 
       <SidebarField label="Category">

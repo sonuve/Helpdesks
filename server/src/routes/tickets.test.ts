@@ -28,16 +28,21 @@ mock.module("../lib/ai.js", () => ({
   summarizeTicket: summarizeTicketMock,
 }));
 
-// POST /api/tickets enqueues classification via lib/queue.ts's
-// enqueueClassifyTicket rather than running it inline — replaced here so
-// this suite never starts a real pg-boss instance (which would need its
-// own schema migration against the test database) just to test the
-// route's request/validation/response-shape logic. The queue's actual job
-// processing (processClassifyTicketJobs) is lib/queue.ts's own concern,
-// covered by queue.test.ts instead — same split as lib/ai.ts's functions
-// being mocked here but tested for real in ai.test.ts.
+// POST /api/tickets enqueues classification and auto-resolution via
+// lib/queue.ts's enqueueClassifyTicket/enqueueAutoResolveTicket rather than
+// running either inline — replaced here so this suite never starts a real
+// pg-boss instance (which would need its own schema migration against the
+// test database) just to test the route's request/validation/response-
+// shape logic. The queues' actual job processing (processClassifyTicketJobs,
+// processAutoResolveTicketJobs) is lib/queue.ts's own concern, covered by
+// queue.test.ts instead — same split as lib/ai.ts's functions being mocked
+// here but tested for real in ai.test.ts.
 const enqueueClassifyTicketMock = mock(async () => {});
-mock.module("../lib/queue.js", () => ({ enqueueClassifyTicket: enqueueClassifyTicketMock }));
+const enqueueAutoResolveTicketMock = mock(async () => {});
+mock.module("../lib/queue.js", () => ({
+  enqueueClassifyTicket: enqueueClassifyTicketMock,
+  enqueueAutoResolveTicket: enqueueAutoResolveTicketMock,
+}));
 
 // POST /api/tickets (the email-to-ticket ingestion webhook): pure
 // request/validation/response-shape logic with no browser involved, so
@@ -132,8 +137,9 @@ describe("POST /api/tickets", () => {
     expect(res.body.ticket.body).toBe(body);
   });
 
-  test("enqueues classification for the new ticket without holding up the response", async () => {
+  test("enqueues classification and auto-resolution for the new ticket without holding up the response", async () => {
     enqueueClassifyTicketMock.mockClear();
+    enqueueAutoResolveTicketMock.mockClear();
     const subject = `Server test classification ${Date.now()}`;
     const body = "I'd like a refund for my last order, please.";
 
@@ -144,10 +150,14 @@ describe("POST /api/tickets", () => {
 
     expect(res.status).toBe(201);
     createdTicketIds.push(res.body.ticket.id);
-    // Not classified yet — enqueuing just queues the job, it doesn't run
-    // it. That's the whole point of going through the queue.
+    // Not classified/resolved yet — enqueuing just queues the jobs, it
+    // doesn't run them. That's the whole point of going through the queue.
     expect(res.body.ticket.category).toBeNull();
+    expect(res.body.ticket.status).toBe("OPEN");
     expect(enqueueClassifyTicketMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: res.body.ticket.id, subject, body }),
+    );
+    expect(enqueueAutoResolveTicketMock).toHaveBeenCalledWith(
       expect.objectContaining({ id: res.body.ticket.id, subject, body }),
     );
   });
@@ -416,6 +426,59 @@ describe("GET /api/tickets", () => {
     test("400s for a category that's neither TicketCategory nor UNCLASSIFIED", async () => {
       const res = await agent.get("/api/tickets?category=NOT_A_REAL_CATEGORY");
       expect(res.status).toBe(400);
+    });
+
+    // Isolated via a distinguishing requesterEmail, same reasoning as the
+    // date-range fixtures below.
+    describe("resolvedByAi filtering", () => {
+      let normalId: number;
+      let aiResolvedId: number;
+
+      beforeAll(async () => {
+        const now = new Date();
+        const normal = await prisma.ticket.create({
+          data: {
+            subject: "Server test resolvedByAi normal",
+            status: "RESOLVED",
+            body: "body",
+            requesterEmail: "resolved-by-ai-fixture@example.com",
+            resolvedByAi: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        normalId = normal.id;
+        const aiResolved = await prisma.ticket.create({
+          data: {
+            subject: "Server test resolvedByAi AI-handled",
+            status: "RESOLVED",
+            body: "body",
+            requesterEmail: "resolved-by-ai-fixture@example.com",
+            resolvedByAi: true,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        aiResolvedId = aiResolved.id;
+      });
+
+      afterAll(async () => {
+        await prisma.ticket.deleteMany({ where: { id: { in: [normalId, aiResolvedId] } } });
+      });
+
+      test("excludes a resolvedByAi ticket from the default (no status filter) response", async () => {
+        const res = await agent.get("/api/tickets?pageSize=100");
+        const ids = (res.body.tickets as { id: number }[]).map((t) => t.id);
+        expect(ids).toContain(normalId);
+        expect(ids).not.toContain(aiResolvedId);
+      });
+
+      test("includes a resolvedByAi ticket once status=RESOLVED is explicitly requested", async () => {
+        const res = await agent.get("/api/tickets?status=RESOLVED&pageSize=100");
+        const ids = (res.body.tickets as { id: number }[]).map((t) => t.id);
+        expect(ids).toContain(normalId);
+        expect(ids).toContain(aiResolvedId);
+      });
     });
 
     // Isolated via category=REFUND_REQUEST (see paginationTicketIds' setup

@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import axios from "axios";
 import { TicketCategory, TicketStatus } from "core";
 import { describe, expect, it, vi, beforeEach } from "vitest";
@@ -84,6 +84,21 @@ describe("TicketsTable", () => {
     expect(screen.getByText("older@example.com")).toBeInTheDocument();
     expect(screen.getByText("Resolved")).toBeInTheDocument();
     expect(screen.getByText("Refund Request")).toBeInTheDocument();
+  });
+
+  it("shows an AI badge next to Status for a ticket resolvedByAi, and not for a normal one", async () => {
+    mockedAxios.get.mockResolvedValue(
+      ticketsResponse([
+        { ...NEWER_TICKET, resolvedByAi: false },
+        { ...OLDER_TICKET, resolvedByAi: true },
+      ]),
+    );
+
+    renderWithQuery(<TicketsTable />);
+    const rows = await screen.findAllByRole("row");
+
+    expect(within(rows[1]!).queryByText("AI")).not.toBeInTheDocument();
+    expect(within(rows[2]!).getByText("AI")).toBeInTheDocument();
   });
 
   it("shows the assignee's name, or 'Unassigned' when there is none", async () => {
