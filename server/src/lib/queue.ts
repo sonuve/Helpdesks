@@ -1,6 +1,8 @@
 import { PgBoss } from "pg-boss";
 import { getOrCreateAiAssistantUser } from "./ai-assistant.js";
 import { classifyTicket, evaluateAutoResolution } from "./ticket-analysis.js";
+import { sendReplyEmail } from "./email-sending.js";
+import { Sentry } from "./sentry.js";
 import { prisma } from "./prisma.js";
 import type { Ticket } from "../generated/prisma/client.js";
 import { ReplySenderType, TicketStatus } from "../generated/prisma/enums.js";
@@ -14,6 +16,7 @@ type AutoResolveTicketJob = {
   subject: string;
   body: string;
   customerName: string | null;
+  requesterEmail: string;
 };
 
 // One pg-boss instance per process, backed by the same Postgres database
@@ -25,7 +28,10 @@ type AutoResolveTicketJob = {
 // side-effect-free for tests, same reasoning as it never calls
 // app.listen() either.
 const boss = new PgBoss(process.env.DATABASE_URL!);
-boss.on("error", (error) => console.error("[pg-boss]", error));
+boss.on("error", (error) => {
+  console.error("[pg-boss]", error);
+  Sentry.captureException(error);
+});
 
 // Processes a batch of classify-ticket jobs — exported separately from
 // startQueue so it's directly testable without needing a real or heavily
@@ -47,6 +53,7 @@ export async function processClassifyTicketJobs(
         `[classify-ticket] job ${job.id} failed for ticket ${job.data.ticketId}:`,
         error,
       );
+      Sentry.captureException(error);
     }
   }
 }
@@ -90,6 +97,17 @@ export async function processAutoResolveTicketJobs(
         continue;
       }
 
+      // Sent before the transaction below, and inside this job's existing
+      // try/catch: a failed send is treated exactly like a failed
+      // evaluation — the outer catch already resets the ticket to OPEN
+      // and unassigns it from the AI agent, so there's nothing extra to
+      // do here beyond letting the throw propagate.
+      await sendReplyEmail({
+        to: job.data.requesterEmail,
+        subject: `Re: ${job.data.subject}`,
+        text: reply,
+      });
+
       const now = new Date();
       await prisma.$transaction([
         prisma.ticketReply.create({
@@ -116,6 +134,7 @@ export async function processAutoResolveTicketJobs(
         `[auto-resolve-ticket] job ${job.id} failed for ticket ${job.data.ticketId}:`,
         error,
       );
+      Sentry.captureException(error);
       // The AI call (or the reply/resolve transaction) failed partway
       // through — explicitly force the ticket back to OPEN, and off the
       // AI agent's plate, rather than trust whatever state it was already
@@ -141,6 +160,7 @@ export async function processAutoResolveTicketJobs(
           `[auto-resolve-ticket] job ${job.id} failed to reset ticket ${job.data.ticketId} to OPEN:`,
           updateError,
         );
+        Sentry.captureException(updateError);
       }
     }
   }
@@ -178,5 +198,6 @@ export async function enqueueAutoResolveTicket(ticket: Ticket): Promise<void> {
     subject: ticket.subject,
     body: ticket.body,
     customerName: ticket.requesterName,
+    requesterEmail: ticket.requesterEmail,
   } satisfies AutoResolveTicketJob);
 }

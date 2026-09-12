@@ -32,6 +32,13 @@ mock.module("./ticket-analysis.js", () => ({
   AI_ASSISTANT_NAME: "AI Assistant",
 }));
 
+// Replaced so this file never makes a real SendGrid API call — same
+// reasoning/scoping as the ticket-analysis.js mock above.
+const sendReplyEmailMock = mock(async () => {});
+mock.module("./email-sending.js", () => ({
+  sendReplyEmail: sendReplyEmailMock,
+}));
+
 const {
   enqueueAutoResolveTicket,
   enqueueClassifyTicket,
@@ -44,6 +51,7 @@ beforeEach(() => {
   sendMock.mockClear();
   classifyTicketMock.mockClear();
   evaluateAutoResolutionMock.mockClear();
+  sendReplyEmailMock.mockClear();
 });
 
 const createdTicketIds: number[] = [];
@@ -86,7 +94,7 @@ describe("enqueueClassifyTicket", () => {
 });
 
 describe("enqueueAutoResolveTicket", () => {
-  test("sends an auto-resolve-ticket job with the ticket's id, subject, body, and requesterName", async () => {
+  test("sends an auto-resolve-ticket job with the ticket's id, subject, body, requesterName, and requesterEmail", async () => {
     const ticket = await createTicket("Can't log in", "I forgot my password.", "Isabella Moreau");
 
     await enqueueAutoResolveTicket(ticket);
@@ -96,6 +104,7 @@ describe("enqueueAutoResolveTicket", () => {
       subject: "Can't log in",
       body: "I forgot my password.",
       customerName: "Isabella Moreau",
+      requesterEmail: "queue-test@example.com",
     });
   });
 });
@@ -172,6 +181,7 @@ describe("processAutoResolveTicketJobs", () => {
           subject: ticket.subject,
           body: ticket.body,
           customerName: null,
+          requesterEmail: ticket.requesterEmail,
         },
       },
     ]);
@@ -204,6 +214,7 @@ describe("processAutoResolveTicketJobs", () => {
           subject: ticket.subject,
           body: ticket.body,
           customerName: null,
+          requesterEmail: ticket.requesterEmail,
         },
       },
     ]);
@@ -223,6 +234,46 @@ describe("processAutoResolveTicketJobs", () => {
     // Still assigned to the AI agent it was resolved by — the assignment
     // made at the start of evaluation isn't undone on success.
     expect(updated.assignedToId).toBe(updated.replies[0]!.authorId);
+    expect(sendReplyEmailMock).toHaveBeenCalledWith({
+      to: ticket.requesterEmail,
+      subject: `Re: ${ticket.subject}`,
+      text: "Hi there, here is the answer to your question.",
+    });
+  });
+
+  test("resets the ticket to OPEN and unassigns it from the AI agent when sending the reply email fails", async () => {
+    evaluateAutoResolutionMock.mockResolvedValueOnce({
+      resolvable: true,
+      reply: "Hi there, here is the answer to your question.",
+    });
+    sendReplyEmailMock.mockRejectedValueOnce(new Error("SendGrid unreachable"));
+    const ticket = await createTicket("How do I reset my password?", "I forgot it.");
+
+    await processAutoResolveTicketJobs([
+      {
+        id: "job-1",
+        data: {
+          ticketId: ticket.id,
+          subject: ticket.subject,
+          body: ticket.body,
+          customerName: null,
+          requesterEmail: ticket.requesterEmail,
+        },
+      },
+    ]);
+
+    const updated = await prisma.ticket.findUniqueOrThrow({
+      where: { id: ticket.id },
+      include: { replies: true },
+    });
+    // Same fallback as an evaluation call throwing: a reply that can't be
+    // delivered is never recorded, and the ticket goes back to the normal
+    // unassigned queue for a human instead of being silently resolved
+    // with no email actually sent.
+    expect(updated.status).toBe("OPEN");
+    expect(updated.resolvedByAi).toBe(false);
+    expect(updated.replies).toHaveLength(0);
+    expect(updated.assignedToId).toBeNull();
   });
 
   test("doesn't clobber a human reassignment made while evaluation was still in progress", async () => {
@@ -258,6 +309,7 @@ describe("processAutoResolveTicketJobs", () => {
             subject: ticket.subject,
             body: ticket.body,
             customerName: null,
+            requesterEmail: ticket.requesterEmail,
           },
         },
       ]);
@@ -284,6 +336,7 @@ describe("processAutoResolveTicketJobs", () => {
           subject: ticket.subject,
           body: ticket.body,
           customerName: "Isabella Moreau",
+          requesterEmail: ticket.requesterEmail,
         },
       },
     ]);
@@ -310,6 +363,7 @@ describe("processAutoResolveTicketJobs", () => {
           subject: failing.subject,
           body: failing.body,
           customerName: null,
+          requesterEmail: failing.requesterEmail,
         },
       },
       {
@@ -319,6 +373,7 @@ describe("processAutoResolveTicketJobs", () => {
           subject: succeeding.subject,
           body: succeeding.body,
           customerName: null,
+          requesterEmail: succeeding.requesterEmail,
         },
       },
     ]);
@@ -345,7 +400,13 @@ describe("processAutoResolveTicketJobs", () => {
     await processAutoResolveTicketJobs([
       {
         id: "job-1",
-        data: { ticketId: ticket.id, subject: ticket.subject, body: ticket.body, customerName: null },
+        data: {
+          ticketId: ticket.id,
+          subject: ticket.subject,
+          body: ticket.body,
+          customerName: null,
+          requesterEmail: ticket.requesterEmail,
+        },
       },
     ]);
 

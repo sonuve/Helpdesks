@@ -7,6 +7,7 @@ import { sessionMiddleware } from "./middleware/session.js";
 import { apiLimiter } from "./middleware/rate-limit.js";
 import { usersRouter } from "./routes/users.js";
 import { ticketsRouter } from "./routes/tickets.js";
+import { inboundEmailRouter } from "./routes/inbound-email.js";
 
 // Split from index.ts so tests can import the configured app directly
 // (e.g. via supertest) without binding a real port — see
@@ -49,3 +50,4 @@ app.get("/api/hello", apiLimiter, (_req: Request, res: Response) => {
 
 app.use(usersRouter);
 app.use(ticketsRouter);
+app.use(inboundEmailRouter);

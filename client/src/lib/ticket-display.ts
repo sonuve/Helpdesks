@@ -87,9 +87,9 @@ export type TicketStats = {
   resolvedByAiPercent: number;
   averageResolutionTimeMs: number | null;
   // Fixed-width, 30 entries, oldest first, zero-filled for days with no
-  // tickets — see server/src/lib/ticket-stats.ts's computeTicketsPerDay.
-  // `date` is a plain "YYYY-MM-DD" (UTC calendar day), not an ISO
-  // timestamp.
+  // tickets — see the get_ticket_stats() Postgres function (added by the
+  // add_ticket_stats_function migration) that computes this. `date` is a
+  // plain "YYYY-MM-DD" (UTC calendar day), not an ISO timestamp.
   ticketsPerDay: TicketsPerDay[];
 };
 

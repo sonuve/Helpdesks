@@ -3,13 +3,10 @@ import { z } from "zod";
 import { createReplySchema, polishReplySchema } from "core";
 import { generateReply, polishReply } from "../lib/reply-drafting.js";
 import { summarizeTicket } from "../lib/ticket-analysis.js";
+import { sendReplyEmail } from "../lib/email-sending.js";
+import { Sentry } from "../lib/sentry.js";
 import { prisma } from "../lib/prisma.js";
-import { enqueueAutoResolveTicket, enqueueClassifyTicket } from "../lib/queue.js";
-import {
-  computeAverageResolutionTimeMs,
-  computeResolvedByAiPercent,
-  computeTicketsPerDay,
-} from "../lib/ticket-stats.js";
+import { createTicketFromEmail, receiveEmailSchema } from "../lib/ticket-ingestion.js";
 import { apiLimiter } from "../middleware/rate-limit.js";
 import type { Prisma } from "../generated/prisma/client.js";
 // Prisma's own generated TicketStatus/TicketCategory, not core's
@@ -123,6 +120,21 @@ ticketsRouter.get("/api/tickets", apiLimiter, async (req: Request, res: Response
   res.json({ tickets, total, page, pageSize });
 });
 
+// The response shape returned by the get_ticket_stats() Postgres function
+// (added by the add_ticket_stats_function migration), which does all of
+// this endpoint's counting/averaging/bucketing in one query instead of the
+// three counts + two findManys this route used to run before combining
+// their results with server/src/lib/ticket-stats.ts's pure JS functions —
+// see that migration's SQL for the arithmetic itself.
+type TicketStatsResult = {
+  totalTickets: number;
+  openTickets: number;
+  resolvedByAiCount: number;
+  resolvedByAiPercent: number;
+  averageResolutionTimeMs: number | null;
+  ticketsPerDay: { date: string; count: number }[];
+};
+
 // Registered before GET /api/tickets/:id — Express matches routes in
 // registration order, and "/api/tickets/stats" also matches that route's
 // :id param (it'd 400 as "Invalid ticket id" if this were registered
@@ -133,47 +145,13 @@ ticketsRouter.get("/api/tickets/stats", apiLimiter, async (req: Request, res: Re
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  // Start of the UTC calendar day 29 days ago — together with "today"
-  // (day 0), that's the 30-day window computeTicketsPerDay below buckets
-  // into. Computed from one `now` (not a fresh `new Date()` in each call)
-  // so the query's cutoff and the bucketing both agree on the same
-  // instant.
-  const now = new Date();
-  const ticketsPerDayWindowStart = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 29),
-  );
+  // Always exactly one row: this is a plain `SELECT <function>()`, not a
+  // query over the ticket table itself.
+  const rows = await prisma.$queryRaw<
+    { stats: TicketStatsResult }[]
+  >`SELECT get_ticket_stats(30) AS stats`;
 
-  const [totalTickets, openTickets, resolvedByAiCount, resolvedTickets, recentTickets] =
-    await Promise.all([
-      prisma.ticket.count(),
-      prisma.ticket.count({ where: { status: TicketStatus.OPEN } }),
-      prisma.ticket.count({ where: { resolvedByAi: true } }),
-      // Only createdAt/resolvedAt are needed to compute the average, not the
-      // whole row — resolvedAt (not updatedAt) is what actually marks when a
-      // ticket left OPEN, see its comment in schema.prisma. The `where`
-      // narrows the query for efficiency; computeAverageResolutionTimeMs
-      // (lib/ticket-stats.ts) still filters resolvedAt itself too, so it
-      // stays correct even called with unfiltered rows elsewhere.
-      prisma.ticket.findMany({
-        where: { resolvedAt: { not: null } },
-        select: { createdAt: true, resolvedAt: true },
-      }),
-      // Only createdAt is needed to bucket by day — narrowed to the
-      // window itself so this doesn't fetch the whole table as it grows.
-      prisma.ticket.findMany({
-        where: { createdAt: { gte: ticketsPerDayWindowStart } },
-        select: { createdAt: true },
-      }),
-    ]);
-
-  res.json({
-    totalTickets,
-    openTickets,
-    resolvedByAiCount,
-    resolvedByAiPercent: computeResolvedByAiPercent(resolvedByAiCount, totalTickets),
-    averageResolutionTimeMs: computeAverageResolutionTimeMs(resolvedTickets),
-    ticketsPerDay: computeTicketsPerDay(recentTickets, 30, now),
-  });
+  res.json(rows[0]!.stats);
 });
 
 // Same access rule as the list endpoint above: any authenticated user, not
@@ -335,10 +313,15 @@ ticketsRouter.patch("/api/tickets/:id/assign", apiLimiter, async (req: Request, 
 });
 
 // Same access rule as every other ticket endpoint: any authenticated user,
-// not just admins. This only records an internal reply on the ticket's
-// thread — actually sending it out as an email is implementation-plan.md's
-// Phase 3 "Manual reply" task, blocked on the same email-provider decision
-// as ingestion (see project-scope.md's "Email ingestion" open question).
+// not just admins. Actually sends the reply as a real outbound email via
+// SendGrid (lib/email-sending.ts's sendReplyEmail) before recording it on
+// the ticket's thread — implementation-plan.md's Phase 3 "Manual reply"
+// task, now that project-scope.md's "Email ingestion provider" decision
+// has settled on SendGrid. The send happens first, and a failure returns
+// 502 without creating a TicketReply row at all: this row is meant to mean
+// "this was actually sent to the requester," so a failed send should leave
+// no trace an agent could mistake for a delivered reply — they just retry
+// the same request once SendGrid is reachable again.
 ticketsRouter.post("/api/tickets/:id/replies", apiLimiter, async (req: Request, res: Response) => {
   if (!req.user) {
     return res.status(401).json({ error: "Unauthorized" });
@@ -357,6 +340,18 @@ ticketsRouter.post("/api/tickets/:id/replies", apiLimiter, async (req: Request, 
   const existing = await prisma.ticket.findUnique({ where: { id: id.data } });
   if (!existing) {
     return res.status(404).json({ error: "Ticket not found" });
+  }
+
+  try {
+    await sendReplyEmail({
+      to: existing.requesterEmail,
+      subject: `Re: ${existing.subject}`,
+      text: parsed.data.body,
+    });
+  } catch (error) {
+    console.error(`[replies] Failed to send reply email for ticket ${id.data}:`, error);
+    Sentry.captureException(error);
+    return res.status(502).json({ error: "Could not send the reply email. Please try again." });
   }
 
   const now = new Date();
@@ -426,6 +421,7 @@ ticketsRouter.post(
       res.json({ body: polished });
     } catch (error) {
       console.error("[polish-reply] AI request failed:", error);
+      Sentry.captureException(error);
       res.status(502).json({ error: "Could not polish this reply. Please try again." });
     }
   },
@@ -464,6 +460,7 @@ ticketsRouter.post(
       res.json({ body: generated });
     } catch (error) {
       console.error("[generate-reply] AI request failed:", error);
+      Sentry.captureException(error);
       res.status(502).json({ error: "Could not generate a reply. Please try again." });
     }
   },
@@ -513,32 +510,22 @@ ticketsRouter.post(
       res.json({ summary });
     } catch (error) {
       console.error("[summarize] AI request failed:", error);
+      Sentry.captureException(error);
       res.status(502).json({ error: "Could not summarize this ticket. Please try again." });
     }
   },
 );
 
-// Validates a webhook-shaped request body, not a client form — there's no
-// UI behind this endpoint, so per CLAUDE.md's data-validation convention
-// this stays local here rather than moving to `core`.
-const receiveEmailSchema = z.object({
-  from: z.string().email("A valid sender email is required"),
-  // Optional: not every email provider surfaces a display name alongside
-  // the address, and this is a display-only nicety (see
-  // Ticket.requesterName in schema.prisma) — never required to accept the
-  // ticket.
-  requesterName: z.string().trim().min(1).optional(),
-  subject: z.string().trim().default("(no subject)"),
-  body: z.string(),
-});
-
-// Simulates "an email arrived at the support address" until a real
-// provider (Gmail API / Microsoft Graph / an inbound-parse webhook — see
-// project-scope.md's "Email ingestion" open question) is wired up to call
-// this. Gated by a shared secret rather than req.user: the real caller
-// will be a provider's webhook, not a signed-in browser session, so this
-// stands in for that until provider-specific signature verification
-// replaces it.
+// Simulates "an email arrived at the support address" — a generic,
+// JSON-bodied landing point kept around for tests and any other
+// system-to-system caller, now that the real caller (SendGrid's Inbound
+// Parse webhook — see project-scope.md's "Email ingestion provider"
+// decision) has its own route, POST /api/email/inbound/:secret
+// (routes/inbound-email.ts), which parses SendGrid's payload down to this
+// same shape and calls lib/ticket-ingestion.ts's createTicketFromEmail
+// directly rather than hitting this route over HTTP. Gated by a shared
+// secret rather than req.user: the real caller is a webhook, not a
+// signed-in browser session.
 ticketsRouter.post("/api/tickets", apiLimiter, async (req: Request, res: Response) => {
   const expectedSecret = process.env.EMAIL_INGEST_SECRET;
   // Fail closed if the secret isn't configured — never treat a missing
@@ -552,32 +539,10 @@ ticketsRouter.post("/api/tickets", apiLimiter, async (req: Request, res: Respons
     return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input" });
   }
 
-  const now = new Date();
-  const ticket = await prisma.ticket.create({
-    data: {
-      subject: parsed.data.subject,
-      body: parsed.data.body,
-      requesterEmail: parsed.data.from.toLowerCase(),
-      requesterName: parsed.data.requesterName ?? null,
-      createdAt: now,
-      updatedAt: now,
-    },
-  });
-
-  // Enqueues classification rather than running it inline — this awaits a
-  // fast pg-boss insert, not the AI call itself (see lib/queue.ts), so the
-  // webhook still responds without waiting on Gemini, matching
-  // tech-stack.md's rationale for keeping ingestion handlers fast (the
-  // full system does this via a BullMQ job; pg-boss is the same
-  // non-blocking, durable outcome on the Postgres this codebase already
-  // has, no Redis needed — see CLAUDE.md's "Ticket classification"). The
-  // response's `ticket.category` is still `null`; callers reading the
-  // category back need a subsequent GET once the queued job completes.
-  await enqueueClassifyTicket(ticket);
-  // Same non-blocking shape, separate job/queue: whether a ticket gets
-  // auto-resolved is independent of its category, so these run as two
-  // parallel jobs rather than one chained pipeline.
-  await enqueueAutoResolveTicket(ticket);
+  // The response's `ticket.category` is still `null` — classification
+  // runs as a queued job, not inline (see createTicketFromEmail); a caller
+  // reading the category back needs a subsequent GET once it completes.
+  const ticket = await createTicketFromEmail(parsed.data);
 
   res.status(201).json({ ticket });
 });

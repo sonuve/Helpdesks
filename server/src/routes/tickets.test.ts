@@ -31,6 +31,15 @@ mock.module("../lib/ticket-analysis.js", () => ({
   summarizeTicket: summarizeTicketMock,
 }));
 
+// POST /api/tickets/:id/replies sends the reply as a real outbound email
+// via lib/email-sending.ts's sendReplyEmail before recording it — replaced
+// here so this suite never makes a real SendGrid API call. Same
+// mock.module/scoping reasoning as the mocks above.
+const sendReplyEmailMock = mock(async () => {});
+mock.module("../lib/email-sending.js", () => ({
+  sendReplyEmail: sendReplyEmailMock,
+}));
+
 // POST /api/tickets enqueues classification and auto-resolution via
 // lib/queue.ts's enqueueClassifyTicket/enqueueAutoResolveTicket rather than
 // running either inline — replaced here so this suite never starts a real
@@ -737,8 +746,10 @@ describe("a single-ticket-scoped session (GET /:id, PATCH /:id/assign)", () => {
     // own wiring (auth, response shape, that resolvedByAiPercent is
     // genuinely derived from resolvedByAiCount/totalTickets, and that
     // totalTickets/openTickets track a ticket created between the two
-    // requests below) — the arithmetic itself is covered by
-    // lib/ticket-stats.test.ts's pure unit tests against fixed input. Both
+    // requests below) — the arithmetic itself is get_ticket_stats(), a
+    // stored Postgres function (see the add_ticket_stats_function
+    // migration), exercised directly against fixed input by
+    // lib/ticket-stats.test.ts. Both
     // requests below double up their assertions (rather than one request
     // per concern) to stay well under apiLimiter's 100-requests/60s budget,
     // which this file's request count is already close to.
@@ -760,9 +771,9 @@ describe("a single-ticket-scoped session (GET /:id, PATCH /:id/assign)", () => {
           (typeof before.body.averageResolutionTimeMs === "number" &&
             before.body.averageResolutionTimeMs >= 0),
       ).toBe(true);
-      // Fixed-width, zero-filled 30-day window — computeTicketsPerDay's
-      // own arithmetic (bucketing, ordering, the zero-fill) is covered by
-      // lib/ticket-stats.test.ts's pure unit tests; this just checks the
+      // Fixed-width, zero-filled 30-day window — get_ticket_stats()'s own
+      // bucketing arithmetic (ordering, the zero-fill) is covered by
+      // lib/ticket-stats.test.ts against fixed input; this just checks the
       // route actually wires it in with the expected shape.
       expect(before.body.ticketsPerDay).toHaveLength(30);
       for (const day of before.body.ticketsPerDay as { date: string; count: number }[]) {
@@ -1048,6 +1059,29 @@ describe("a single-ticket-scoped session (GET /:id, PATCH /:id/assign)", () => {
       });
       expect(typeof res.body.reply.id).toBe("number");
       expect(typeof res.body.reply.createdAt).toBe("string");
+      // Sent as a real outbound email to the ticket's requester, not just
+      // recorded internally — see lib/email-sending.ts.
+      expect(sendReplyEmailMock).toHaveBeenCalledWith({
+        to: "detail-fixture@example.com",
+        subject: "Re: Detail fixture",
+        text: "Thanks for reaching out.",
+      });
+    });
+
+    test("502s with a clean message when sending the reply email fails, and doesn't record a reply", async () => {
+      sendReplyEmailMock.mockRejectedValueOnce(new Error("SendGrid unreachable"));
+      const before = await prisma.ticketReply.count({ where: { ticketId } });
+
+      const res = await agent
+        .post(`/api/tickets/${ticketId}/replies`)
+        .send({ body: "This should never be sent." });
+
+      expect(res.status).toBe(502);
+      expect(res.body).toEqual({ error: "Could not send the reply email. Please try again." });
+      // A failed send must never leave a TicketReply row behind claiming
+      // something was delivered that wasn't.
+      const after = await prisma.ticketReply.count({ where: { ticketId } });
+      expect(after).toBe(before);
     });
 
     test("ignores a client-supplied senderType and always records AGENT", async () => {

@@ -23,15 +23,15 @@ Tasks are grouped into phases, each building on the last. Tasks flagged **[block
 
 ## Phase 2 — Ticket ingestion & manual workflow (no AI yet)
 
-- [ ] Connect to shared support mailbox via provider API (Gmail API or Microsoft Graph) **[blocked: which provider]**
-- [ ] Webhook endpoint to receive new-email push notifications
-- [ ] Email → ticket creation: parse sender, subject, body, attachments
+- [x] Connect to shared support mailbox — SendGrid Inbound Parse webhook (see project-scope.md's "Email ingestion provider" decision), not Gmail API/Microsoft Graph polling
+- [x] Webhook endpoint to receive new-email push notifications — `POST /api/email/inbound/:secret` (`server/src/routes/inbound-email.ts`)
+- [x] Email → ticket creation: parse sender, subject, body (attachments not yet — see below)
 - [ ] Reply-threading: match incoming email to existing ticket **[blocked: threading strategy — Message-ID/References vs. subject matching]**
 - [ ] Attachment storage (e.g. S3) and display on ticket detail
 - [ ] Spam/phishing filter pass before ticket creation
 - [ ] Ticket list UI: filter by status/category, sort
 - [ ] Ticket detail UI: email thread view, manual status change
-- [ ] Manual reply: agent composes and sends a reply via the email API (no AI involved yet) — proves the ingestion/send loop end-to-end before adding AI
+- [x] Manual reply: agent composes and sends a reply via the email API (no AI involved yet) — proves the ingestion/send loop end-to-end before adding AI. Sends via SendGrid's Mail Send API (`server/src/lib/email-sending.ts`), the send-side counterpart to the Inbound Parse webhook above.
 
 ## Phase 3 — AI classification & summarization
 
