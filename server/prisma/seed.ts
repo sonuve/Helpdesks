@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { auth } from "../src/lib/auth.js";
+import { getOrCreateAiAssistantUser } from "../src/lib/ai-assistant.js";
 import { prisma } from "../src/lib/prisma.js";
 import { Role } from "../src/generated/prisma/enums.js";
 
@@ -52,5 +53,13 @@ if (existingAccount) {
 }
 
 console.log(`Seeded admin user: ${email}`);
+
+// Same well-known "AI Assistant" agent lib/queue.ts's auto-resolve job
+// assigns tickets to and authors resolved-by-AI replies as (see
+// lib/ai-assistant.ts) — seeded here too so it exists (and is visible/
+// assignable) immediately in a fresh database, rather than only appearing
+// after the first ticket's auto-resolve job happens to run.
+const aiAssistant = await getOrCreateAiAssistantUser();
+console.log(`Seeded AI Assistant agent: ${aiAssistant.email}`);
 
 await prisma.$disconnect();

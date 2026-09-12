@@ -160,7 +160,7 @@ describe("processClassifyTicketJobs", () => {
 });
 
 describe("processAutoResolveTicketJobs", () => {
-  test("leaves the ticket untouched when the model judges it not resolvable", async () => {
+  test("assigns the ticket to the AI agent while evaluating, then unassigns it when not resolvable", async () => {
     evaluateAutoResolutionMock.mockResolvedValueOnce({ resolvable: false, reply: null });
     const ticket = await createTicket("Refund please", "I'd like my money back.");
 
@@ -183,9 +183,13 @@ describe("processAutoResolveTicketJobs", () => {
     expect(updated.status).toBe("OPEN");
     expect(updated.resolvedByAi).toBe(false);
     expect(updated.replies).toHaveLength(0);
+    // Assigned to the AI agent partway through (asserted via the mock call
+    // below), but handed back to the normal unassigned queue since the AI
+    // couldn't resolve it.
+    expect(updated.assignedToId).toBeNull();
   });
 
-  test("sends a reply authored by AI Assistant and resolves the ticket when judged resolvable", async () => {
+  test("sends a reply authored by AI Assistant, resolves the ticket, and leaves it assigned to the AI agent", async () => {
     evaluateAutoResolutionMock.mockResolvedValueOnce({
       resolvable: true,
       reply: "Hi there, here is the answer to your question.",
@@ -216,6 +220,56 @@ describe("processAutoResolveTicketJobs", () => {
     expect(updated.replies[0]!.senderType).toBe("AGENT");
     expect(updated.replies[0]!.author.email).toBe("ai-assistant@internal.helpdesks");
     expect(updated.replies[0]!.author.name).toBe("AI Assistant");
+    // Still assigned to the AI agent it was resolved by — the assignment
+    // made at the start of evaluation isn't undone on success.
+    expect(updated.assignedToId).toBe(updated.replies[0]!.authorId);
+  });
+
+  test("doesn't clobber a human reassignment made while evaluation was still in progress", async () => {
+    const human = await prisma.user.create({
+      data: {
+        id: crypto.randomUUID(),
+        name: "Queue Test Human Agent",
+        email: `queue-test-human-${Date.now()}@example.com`,
+        emailVerified: true,
+        role: "AGENT",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    });
+    const ticket = await createTicket("Question", "Body");
+    // Simulates a human claiming the ticket in the middle of the AI's
+    // evaluation call — the mock performs the reassignment itself, as a
+    // stand-in for a concurrent PATCH /api/tickets/:id/assign request.
+    evaluateAutoResolutionMock.mockImplementationOnce(async () => {
+      await prisma.ticket.update({
+        where: { id: ticket.id },
+        data: { assignedToId: human.id },
+      });
+      return { resolvable: false, reply: null };
+    });
+
+    try {
+      await processAutoResolveTicketJobs([
+        {
+          id: "job-1",
+          data: {
+            ticketId: ticket.id,
+            subject: ticket.subject,
+            body: ticket.body,
+            customerName: null,
+          },
+        },
+      ]);
+
+      const updated = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+      // Still assigned to the human, not cleared back to null — the
+      // not-resolvable branch's unassign only fires if the ticket is
+      // *still* assigned to the AI agent at that point.
+      expect(updated.assignedToId).toBe(human.id);
+    } finally {
+      await prisma.user.delete({ where: { id: human.id } });
+    }
   });
 
   test("passes the ticket's customerName through to the AI judgment call", async () => {
@@ -275,11 +329,12 @@ describe("processAutoResolveTicketJobs", () => {
     });
     expect(updatedFailing.status).toBe("OPEN");
     expect(updatedFailing.resolvedByAi).toBe(false);
+    expect(updatedFailing.assignedToId).toBeNull();
     expect(updatedSucceeding.status).toBe("RESOLVED");
     expect(updatedSucceeding.resolvedByAi).toBe(true);
   });
 
-  test("explicitly resets the ticket to OPEN when the AI evaluation call throws", async () => {
+  test("resets the ticket to OPEN and unassigns it from the AI agent when the evaluation call throws", async () => {
     evaluateAutoResolutionMock.mockRejectedValueOnce(new Error("upstream timeout"));
     const ticket = await createTicket("Will fail", "Body");
     // Started from a non-OPEN status so this test actually proves the catch
@@ -296,5 +351,6 @@ describe("processAutoResolveTicketJobs", () => {
 
     const updated = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
     expect(updated.status).toBe("OPEN");
+    expect(updated.assignedToId).toBeNull();
   });
 });
