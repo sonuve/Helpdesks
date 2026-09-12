@@ -3,7 +3,7 @@ import { GuestRoute } from "./components/GuestRoute.tsx";
 import { ProtectedRoute } from "./components/ProtectedRoute.tsx";
 import { AdminRoute } from "./components/AdminRoute.tsx";
 import { LoginPage } from "./pages/LoginPage.tsx";
-import { HomePage } from "./pages/HomePage.tsx";
+import { DashboardPage } from "./pages/DashboardPage.tsx";
 import { UsersPage } from "./pages/UsersPage.tsx";
 import { TicketsPage } from "./pages/TicketsPage.tsx";
 import { TicketDetailPage } from "./pages/TicketDetailPage.tsx";
@@ -16,7 +16,7 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
         </Route>
         <Route element={<ProtectedRoute />}>
-          <Route path="/" element={<HomePage />} />
+          <Route path="/" element={<DashboardPage />} />
           <Route path="/tickets" element={<TicketsPage />} />
           <Route path="/tickets/:id" element={<TicketDetailPage />} />
           <Route element={<AdminRoute />}>

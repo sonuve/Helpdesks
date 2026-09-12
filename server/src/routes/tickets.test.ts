@@ -723,6 +723,65 @@ describe("a single-ticket-scoped session (GET /:id, PATCH /:id/assign)", () => {
     });
   });
 
+  describe("GET /api/tickets/stats", () => {
+    test("401s when unauthenticated", async () => {
+      const res = await request.get("/api/tickets/stats");
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ error: "Unauthorized" });
+    });
+
+    // The exact numbers here are shared, live state — every other describe
+    // in this file (and every other test file hitting the same database)
+    // creates/updates tickets too, so asserting a specific totalTickets
+    // value would be flaky. What's actually being tested is the route's
+    // own wiring (auth, response shape, that resolvedByAiPercent is
+    // genuinely derived from resolvedByAiCount/totalTickets, and that
+    // totalTickets/openTickets track a ticket created between the two
+    // requests below) — the arithmetic itself is covered by
+    // lib/ticket-stats.test.ts's pure unit tests against fixed input. Both
+    // requests below double up their assertions (rather than one request
+    // per concern) to stay well under apiLimiter's 100-requests/60s budget,
+    // which this file's request count is already close to.
+    test("returns counts consistent with each other, and tracks a ticket created in between", async () => {
+      const before = await agent.get("/api/tickets/stats");
+
+      expect(before.status).toBe(200);
+      expect(typeof before.body.totalTickets).toBe("number");
+      expect(typeof before.body.openTickets).toBe("number");
+      expect(typeof before.body.resolvedByAiCount).toBe("number");
+      expect(before.body.openTickets).toBeLessThanOrEqual(before.body.totalTickets);
+      expect(before.body.resolvedByAiCount).toBeLessThanOrEqual(before.body.totalTickets);
+      expect(before.body.resolvedByAiPercent).toBeCloseTo(
+        (before.body.resolvedByAiCount / before.body.totalTickets) * 100,
+        5,
+      );
+      expect(
+        before.body.averageResolutionTimeMs === null ||
+          (typeof before.body.averageResolutionTimeMs === "number" &&
+            before.body.averageResolutionTimeMs >= 0),
+      ).toBe(true);
+
+      const now = new Date();
+      const extra = await prisma.ticket.create({
+        data: {
+          subject: "Stats fixture",
+          body: "Counted by GET /api/tickets/stats.",
+          requesterEmail: "stats-fixture@example.com",
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+
+      try {
+        const after = await agent.get("/api/tickets/stats");
+        expect(after.body.totalTickets).toBeGreaterThanOrEqual(before.body.totalTickets + 1);
+        expect(after.body.openTickets).toBeGreaterThanOrEqual(before.body.openTickets + 1);
+      } finally {
+        await prisma.ticket.delete({ where: { id: extra.id } });
+      }
+    });
+  });
+
   describe("PATCH /api/tickets/:id", () => {
     test("401s when unauthenticated", async () => {
       const res = await request.patch(`/api/tickets/${ticketId}`).send({ status: "RESOLVED" });
@@ -783,6 +842,47 @@ describe("a single-ticket-scoped session (GET /:id, PATCH /:id/assign)", () => {
       expect(res.status).toBe(200);
       expect(res.body.ticket.status).toBe("RESOLVED");
       expect(res.body.ticket.category).toBe("REFUND_REQUEST");
+    });
+
+    // These four run as one chained sequence — each builds on the previous
+    // request's resulting state, rather than resetting to a known status
+    // first — to keep this file's total request count well under
+    // apiLimiter's 100-requests/60s budget (matching the style already
+    // used above, e.g. "leaves status untouched when only category is
+    // given" relying on the prior test's status change). The ticket enters
+    // this sequence as RESOLVED, from the "leaves status untouched..." test
+    // just above.
+    let capturedResolvedAt: string | null;
+
+    test("clears resolvedAt when a ticket is reopened to OPEN", async () => {
+      const res = await agent.patch(`/api/tickets/${ticketId}`).send({ status: "OPEN" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.ticket.resolvedAt).toBeNull();
+    });
+
+    test("sets resolvedAt when a ticket transitions from OPEN to a non-OPEN status", async () => {
+      const res = await agent.patch(`/api/tickets/${ticketId}`).send({ status: "RESOLVED" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.ticket.resolvedAt).not.toBeNull();
+      capturedResolvedAt = res.body.ticket.resolvedAt;
+    });
+
+    test("leaves resolvedAt untouched when moving between two non-OPEN statuses", async () => {
+      const res = await agent.patch(`/api/tickets/${ticketId}`).send({ status: "CLOSED" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.ticket.resolvedAt).toBe(capturedResolvedAt);
+    });
+
+    test("leaves resolvedAt untouched when only category is given", async () => {
+      const res = await agent
+        .patch(`/api/tickets/${ticketId}`)
+        .send({ category: "GENERAL_QUESTION" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.ticket.resolvedAt).toBe(capturedResolvedAt);
     });
 
     test("400s for a status outside TicketStatus", async () => {

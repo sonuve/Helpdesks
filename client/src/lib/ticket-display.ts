@@ -72,3 +72,37 @@ export const replySenderTypeBadgeVariant: Record<ReplySenderType, "default" | "s
   [ReplySenderType.AGENT]: "secondary",
   [ReplySenderType.CUSTOMER]: "default",
 };
+
+// GET /api/tickets/stats's response shape — the dashboard's aggregate
+// counters. averageResolutionTimeMs is null (not 0/NaN) when no ticket has
+// been resolved yet, matching server/src/lib/ticket-stats.ts's
+// computeAverageResolutionTimeMs — "no data" and "resolved instantly" are
+// different things the dashboard should render differently.
+export type TicketStats = {
+  totalTickets: number;
+  openTickets: number;
+  resolvedByAiCount: number;
+  resolvedByAiPercent: number;
+  averageResolutionTimeMs: number | null;
+};
+
+// Renders a millisecond duration as a compact, human-readable string (e.g.
+// "2d 4h", "3h 15m", "45m") for the dashboard's "average resolution time"
+// stat — raw milliseconds (or even raw hours) wouldn't read naturally.
+// Picks the two largest non-zero units rather than every unit down to the
+// second, since a support-ticket resolution time in the tens of minutes to
+// several days doesn't need second-level precision.
+export function formatDuration(ms: number): string {
+  const totalMinutes = Math.round(ms / 60_000);
+  if (totalMinutes < 60) {
+    return `${totalMinutes}m`;
+  }
+  const totalHours = Math.floor(totalMinutes / 60);
+  const remainingMinutes = totalMinutes % 60;
+  if (totalHours < 24) {
+    return remainingMinutes === 0 ? `${totalHours}h` : `${totalHours}h ${remainingMinutes}m`;
+  }
+  const days = Math.floor(totalHours / 24);
+  const remainingHours = totalHours % 24;
+  return remainingHours === 0 ? `${days}d` : `${days}d ${remainingHours}h`;
+}

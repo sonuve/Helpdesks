@@ -5,6 +5,7 @@ import { generateReply, polishReply } from "../lib/reply-drafting.js";
 import { summarizeTicket } from "../lib/ticket-analysis.js";
 import { prisma } from "../lib/prisma.js";
 import { enqueueAutoResolveTicket, enqueueClassifyTicket } from "../lib/queue.js";
+import { computeAverageResolutionTimeMs, computeResolvedByAiPercent } from "../lib/ticket-stats.js";
 import { apiLimiter } from "../middleware/rate-limit.js";
 import type { Prisma } from "../generated/prisma/client.js";
 // Prisma's own generated TicketStatus/TicketCategory, not core's
@@ -118,6 +119,41 @@ ticketsRouter.get("/api/tickets", apiLimiter, async (req: Request, res: Response
   res.json({ tickets, total, page, pageSize });
 });
 
+// Registered before GET /api/tickets/:id — Express matches routes in
+// registration order, and "/api/tickets/stats" also matches that route's
+// :id param (it'd 400 as "Invalid ticket id" if this were registered
+// after it), so the literal path has to come first. Same access rule as
+// every other ticket endpoint: any authenticated user, not just admins.
+ticketsRouter.get("/api/tickets/stats", apiLimiter, async (req: Request, res: Response) => {
+  if (!req.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const [totalTickets, openTickets, resolvedByAiCount, resolvedTickets] = await Promise.all([
+    prisma.ticket.count(),
+    prisma.ticket.count({ where: { status: TicketStatus.OPEN } }),
+    prisma.ticket.count({ where: { resolvedByAi: true } }),
+    // Only createdAt/resolvedAt are needed to compute the average, not the
+    // whole row — resolvedAt (not updatedAt) is what actually marks when a
+    // ticket left OPEN, see its comment in schema.prisma. The `where`
+    // narrows the query for efficiency; computeAverageResolutionTimeMs
+    // (lib/ticket-stats.ts) still filters resolvedAt itself too, so it
+    // stays correct even called with unfiltered rows elsewhere.
+    prisma.ticket.findMany({
+      where: { resolvedAt: { not: null } },
+      select: { createdAt: true, resolvedAt: true },
+    }),
+  ]);
+
+  res.json({
+    totalTickets,
+    openTickets,
+    resolvedByAiCount,
+    resolvedByAiPercent: computeResolvedByAiPercent(resolvedByAiCount, totalTickets),
+    averageResolutionTimeMs: computeAverageResolutionTimeMs(resolvedTickets),
+  });
+});
+
 // Same access rule as the list endpoint above: any authenticated user, not
 // just admins.
 ticketsRouter.get("/api/tickets/:id", apiLimiter, async (req: Request, res: Response) => {
@@ -192,12 +228,27 @@ ticketsRouter.patch("/api/tickets/:id", apiLimiter, async (req: Request, res: Re
     return res.status(404).json({ error: "Ticket not found" });
   }
 
+  const now = new Date();
+  // Ticket.resolvedAt tracks the first time this ticket left OPEN, separate
+  // from updatedAt (which every kind of activity bumps — a reply, a
+  // reassignment, a category change) — see its comment in schema.prisma.
+  // Reopening to OPEN clears it; moving between two non-OPEN statuses (e.g.
+  // RESOLVED -> CLOSED) leaves the original resolution time alone rather
+  // than resetting the clock.
+  let resolvedAt: Date | null | undefined;
+  if (status === TicketStatus.OPEN) {
+    resolvedAt = null;
+  } else if (status !== undefined && existing.status === TicketStatus.OPEN) {
+    resolvedAt = now;
+  }
+
   const ticket = await prisma.ticket.update({
     where: { id: id.data },
     data: {
       ...(status !== undefined ? { status } : {}),
       ...(category !== undefined ? { category } : {}),
-      updatedAt: new Date(),
+      ...(resolvedAt !== undefined ? { resolvedAt } : {}),
+      updatedAt: now,
     },
     include: { assignedTo: { select: { id: true, name: true, email: true } } },
   });

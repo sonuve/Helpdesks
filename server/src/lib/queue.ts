@@ -115,7 +115,12 @@ export async function processAutoResolveTicketJobs(
         }),
         prisma.ticket.update({
           where: { id: job.data.ticketId },
-          data: { status: TicketStatus.RESOLVED, resolvedByAi: true, updatedAt: now },
+          data: {
+            status: TicketStatus.RESOLVED,
+            resolvedByAi: true,
+            resolvedAt: now,
+            updatedAt: now,
+          },
         }),
       ]);
     } catch (error) {

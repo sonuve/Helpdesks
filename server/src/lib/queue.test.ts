@@ -210,6 +210,7 @@ describe("processAutoResolveTicketJobs", () => {
     });
     expect(updated.status).toBe("RESOLVED");
     expect(updated.resolvedByAi).toBe(true);
+    expect(updated.resolvedAt).not.toBeNull();
     expect(updated.replies).toHaveLength(1);
     expect(updated.replies[0]!.body).toBe("Hi there, here is the answer to your question.");
     expect(updated.replies[0]!.senderType).toBe("AGENT");

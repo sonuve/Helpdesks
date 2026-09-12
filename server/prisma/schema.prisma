@@ -145,6 +145,14 @@ model Ticket {
   // list agents actually work from, but an explicit status filter still
   // returns them; see project-scope.md's "AI autonomy" decision.
   resolvedByAi   Boolean         @default(false)
+  // Nullable: set the first time a ticket leaves OPEN (becomes RESOLVED or
+  // CLOSED, by an agent via PATCH /api/tickets/:id or by the auto-resolve
+  // job), cleared back to null if it's reopened to OPEN. Distinct from
+  // updatedAt, which every kind of activity bumps (a reply, a reassignment,
+  // a category change) — resolvedAt exists specifically so the dashboard's
+  // "average resolution time" stat (createdAt to resolvedAt) isn't skewed
+  // by unrelated activity after a ticket was actually resolved.
+  resolvedAt     DateTime?
   createdAt      DateTime
   updatedAt      DateTime
   replies        TicketReply[]

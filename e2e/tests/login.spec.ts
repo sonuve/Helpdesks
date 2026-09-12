@@ -49,16 +49,18 @@ test.describe("login", () => {
     await expect(page).toHaveURL("/login");
   });
 
-  test("signs in with valid credentials and reaches the home page", async ({ page }) => {
+  test("signs in with valid credentials and reaches the dashboard", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel("Email").fill(AGENT_USER.email);
     await page.getByLabel("Password").fill(AGENT_USER.password);
     await page.getByRole("button", { name: "Sign in" }).click();
 
     await expect(page).toHaveURL("/");
-    await expect(page.getByRole("heading", { name: "Helpdesks" })).toBeVisible();
-    // HomePage fetches /api/health on mount and renders the result.
-    await expect(page.getByText(/API status: ok/i)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+    // DashboardStats fetches GET /api/tickets/stats on mount and renders
+    // stat cards from the real response; "Total tickets" is the one label
+    // that's unique among them (unlike "Resolved by AI", which appears twice).
+    await expect(page.getByText("Total tickets")).toBeVisible();
     // NavBar renders for the authenticated shell.
     await expect(page.getByText(AGENT_USER.name)).toBeVisible();
   });
