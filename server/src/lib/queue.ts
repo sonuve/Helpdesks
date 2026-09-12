@@ -81,10 +81,12 @@ async function getOrCreateAiAssistantUser() {
 
 // Processes a batch of auto-resolve-ticket jobs — same per-job try/catch
 // shape as processClassifyTicketJobs above, and the same reason for it.
-// A ticket judged not resolvable (or one whose classification/generation
-// otherwise fails) is simply left alone: no reply, no status change,
-// exactly like today, so this can only ever resolve *more* tickets than
-// the pre-AI baseline, never fewer.
+// A ticket judged not resolvable is simply left alone: no reply, no status
+// change, exactly like today, so this can only ever resolve *more* tickets
+// than the pre-AI baseline, never fewer. A ticket whose evaluation call (or
+// the reply/resolve transaction) throws is different — the catch below
+// explicitly resets it to OPEN, rather than risk it silently sitting
+// outside an agent's normal queue with no reply and no resolution.
 export async function processAutoResolveTicketJobs(
   jobs: { id: string; data: AutoResolveTicketJob }[],
 ): Promise<void> {
@@ -121,6 +123,23 @@ export async function processAutoResolveTicketJobs(
         `[auto-resolve-ticket] job ${job.id} failed for ticket ${job.data.ticketId}:`,
         error,
       );
+      // The AI call (or the reply/resolve transaction) failed partway
+      // through — explicitly force the ticket back to OPEN rather than
+      // trust whatever state it was already in, so a failure here can
+      // never leave a ticket silently stuck out of an agent's queue.
+      // Own try/catch so a failing update here still doesn't stop the
+      // rest of the batch (same reasoning as the outer per-job catch).
+      try {
+        await prisma.ticket.update({
+          where: { id: job.data.ticketId },
+          data: { status: TicketStatus.OPEN },
+        });
+      } catch (updateError) {
+        console.error(
+          `[auto-resolve-ticket] job ${job.id} failed to reset ticket ${job.data.ticketId} to OPEN:`,
+          updateError,
+        );
+      }
     }
   }
 }

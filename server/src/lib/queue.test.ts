@@ -277,4 +277,23 @@ describe("processAutoResolveTicketJobs", () => {
     expect(updatedSucceeding.status).toBe("RESOLVED");
     expect(updatedSucceeding.resolvedByAi).toBe(true);
   });
+
+  test("explicitly resets the ticket to OPEN when the AI evaluation call throws", async () => {
+    evaluateAutoResolutionMock.mockRejectedValueOnce(new Error("upstream timeout"));
+    const ticket = await createTicket("Will fail", "Body");
+    // Started from a non-OPEN status so this test actually proves the catch
+    // resets it, rather than just observing a status that was never
+    // touched in the first place (every ticket already starts OPEN).
+    await prisma.ticket.update({ where: { id: ticket.id }, data: { status: "CLOSED" } });
+
+    await processAutoResolveTicketJobs([
+      {
+        id: "job-1",
+        data: { ticketId: ticket.id, subject: ticket.subject, body: ticket.body, customerName: null },
+      },
+    ]);
+
+    const updated = await prisma.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+    expect(updated.status).toBe("OPEN");
+  });
 });
