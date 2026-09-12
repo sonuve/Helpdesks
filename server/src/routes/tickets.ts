@@ -1,7 +1,8 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { createReplySchema, polishReplySchema } from "core";
-import { generateReply, polishReply, summarizeTicket } from "../lib/ai.js";
+import { generateReply, polishReply } from "../lib/reply-drafting.js";
+import { summarizeTicket } from "../lib/ticket-analysis.js";
 import { prisma } from "../lib/prisma.js";
 import { enqueueAutoResolveTicket, enqueueClassifyTicket } from "../lib/queue.js";
 import { apiLimiter } from "../middleware/rate-limit.js";
@@ -396,7 +397,7 @@ ticketsRouter.post(
 );
 
 // An agent-facing "catch me up" summary of the ticket and its reply thread
-// so far — not persisted anywhere (see lib/ai.ts's summarizeTicket), so the
+// so far — not persisted anywhere (see lib/ticket-analysis.ts's summarizeTicket), so the
 // client is expected to call this again whenever it wants a current one
 // rather than relying on a cached result. Same req.user-only, no-request-
 // body shape as generate-reply above.

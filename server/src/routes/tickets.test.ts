@@ -6,25 +6,28 @@ import { app } from "../app.js";
 import { prisma } from "../lib/prisma.js";
 
 // POST /api/tickets/:id/polish-reply, .../generate-reply, and
-// .../summarize all call out to a real AI provider via lib/ai.ts —
-// replaced here so this suite never makes a real network call (or needs a
-// real API key) just to test these routes' request/validation/response-
-// shape logic. Bun's mock.module retroactively replaces the module for
-// consumers that already imported it (tickets.ts, pulled in transitively
-// via `app` above), not just future imports. Every export must be present
-// here even though a given test file section only exercises one — the
-// mocked module replaces lib/ai.ts's entire export table, so an omitted
-// export would be `undefined` in tickets.ts and crash the *other* routes
-// instead of just not being tested. This is scoped to this file only —
-// server/package.json's test script runs `bun test --isolate`, giving
-// each test file its own module registry, so this mock (and queue.test.ts's
-// separate mock of the same resolved path) can't leak into each other.
+// .../summarize all call out to a real AI provider via lib/reply-drafting.ts
+// and lib/ticket-analysis.ts — replaced here so this suite never makes a
+// real network call (or needs a real API key) just to test these routes'
+// request/validation/response-shape logic. Bun's mock.module retroactively
+// replaces the module for consumers that already imported it (tickets.ts,
+// pulled in transitively via `app` above), not just future imports. Every
+// export must be present in each mock even though a given test file section
+// only exercises one — the mocked module replaces that file's entire export
+// table, so an omitted export would be `undefined` in tickets.ts and crash
+// the *other* routes instead of just not being tested. This is scoped to
+// this file only — server/package.json's test script runs `bun test
+// --isolate`, giving each test file its own module registry, so these
+// mocks (and queue.test.ts's separate mock of the same resolved paths)
+// can't leak into each other.
 const polishReplyMock = mock(async () => "Mocked polished reply.");
 const generateReplyMock = mock(async () => "Mocked generated reply.");
-const summarizeTicketMock = mock(async () => "Mocked summary.");
-mock.module("../lib/ai.js", () => ({
+mock.module("../lib/reply-drafting.js", () => ({
   polishReply: polishReplyMock,
   generateReply: generateReplyMock,
+}));
+const summarizeTicketMock = mock(async () => "Mocked summary.");
+mock.module("../lib/ticket-analysis.js", () => ({
   summarizeTicket: summarizeTicketMock,
 }));
 
@@ -35,8 +38,9 @@ mock.module("../lib/ai.js", () => ({
 // test database) just to test the route's request/validation/response-
 // shape logic. The queues' actual job processing (processClassifyTicketJobs,
 // processAutoResolveTicketJobs) is lib/queue.ts's own concern, covered by
-// queue.test.ts instead — same split as lib/ai.ts's functions being mocked
-// here but tested for real in ai.test.ts.
+// queue.test.ts instead — same split as lib/reply-drafting.ts's and
+// lib/ticket-analysis.ts's functions being mocked here but tested for real
+// in reply-drafting.test.ts and ticket-analysis.test.ts.
 const enqueueClassifyTicketMock = mock(async () => {});
 const enqueueAutoResolveTicketMock = mock(async () => {});
 mock.module("../lib/queue.js", () => ({

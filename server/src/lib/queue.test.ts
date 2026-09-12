@@ -26,7 +26,7 @@ const evaluateAutoResolutionMock = mock(
     reply: null,
   }),
 );
-mock.module("./ai.js", () => ({
+mock.module("./ticket-analysis.js", () => ({
   classifyTicket: classifyTicketMock,
   evaluateAutoResolution: evaluateAutoResolutionMock,
   AI_ASSISTANT_NAME: "AI Assistant",

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { PgBoss } from "pg-boss";
-import { AI_ASSISTANT_NAME, classifyTicket, evaluateAutoResolution } from "./ai.js";
+import { AI_ASSISTANT_NAME, classifyTicket, evaluateAutoResolution } from "./ticket-analysis.js";
 import { prisma } from "./prisma.js";
 import type { Ticket } from "../generated/prisma/client.js";
 import { ReplySenderType, Role, TicketStatus } from "../generated/prisma/enums.js";
