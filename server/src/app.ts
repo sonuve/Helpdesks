@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 import express, { type Request, type Response } from "express";
 import cors from "cors";
@@ -53,15 +54,23 @@ app.use(usersRouter);
 app.use(ticketsRouter);
 app.use(inboundEmailRouter);
 
-// Single-service deployment (Railway): the client has no configurable API
-// base URL (it fetches relative /api/* paths, same-origin only — see
-// vite.config.ts's dev-only proxy), so production serves the built SPA
-// from this same Express app/origin rather than hosting it separately.
-// Registered last, after every /api/* route above, so an unmatched /api
-// path still falls through to those rather than being swallowed by the
-// catch-all below.
-if (process.env.NODE_ENV === "production") {
-  const clientDist = path.resolve(import.meta.dirname, "../../client/dist");
+// Single-service deployment (Railway/Render): the client has no
+// configurable API base URL (it fetches relative /api/* paths,
+// same-origin only — see vite.config.ts's dev-only proxy), so production
+// serves the built SPA from this same Express app/origin rather than
+// hosting it separately. Registered last, after every /api/* route above,
+// so an unmatched /api path still falls through to those rather than
+// being swallowed by the catch-all below.
+//
+// Gated on the built client actually existing rather than
+// NODE_ENV === "production": some platforms don't reliably thread a
+// configured NODE_ENV value through to the running container the way
+// you'd expect, and "is there a built index.html to serve" is the real
+// question anyway — it's false in dev (no one runs `vite build` there)
+// and in tests (supertest imports this file directly, never building the
+// client), and true in exactly the deployed-image case this exists for.
+const clientDist = path.resolve(import.meta.dirname, "../../client/dist");
+if (existsSync(path.join(clientDist, "index.html"))) {
   app.use(express.static(clientDist));
   app.get("/{*splat}", (_req: Request, res: Response) => {
     res.sendFile(path.join(clientDist, "index.html"));
