@@ -1,0 +1,9 @@
+.git
+.claude
+.agents
+**/node_modules
+client/dist
+server/src/generated
+e2e
+**/.env*
+*.log
