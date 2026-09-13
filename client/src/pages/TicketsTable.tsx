@@ -112,7 +112,7 @@ const columns: ColumnDef<TicketListItem>[] = [
     header: ({ column }) => <SortableHeader label="Category" column={column} />,
     cell: ({ row }) =>
       row.original.category ? (
-        categoryLabels[row.original.category]
+        <Badge variant="outline">{categoryLabels[row.original.category]}</Badge>
       ) : (
         <span className="text-muted-foreground">—</span>
       ),
