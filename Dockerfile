@@ -6,15 +6,24 @@ FROM oven/bun:1
 
 WORKDIR /app
 
+# server/prisma.config.ts loads DATABASE_URL via prisma/config's env() at
+# *config-load* time, so even `prisma generate` (which never actually
+# connects to a database) needs some value present once that file is in
+# the build context. A placeholder is fine here — the real DATABASE_URL
+# passed at `docker run`/Railway overrides this at container runtime.
+ENV DATABASE_URL="postgresql://user:password@localhost:5432/db?schema=public"
+
 # Install only the workspaces this image needs. e2e/'s Playwright
 # devDependency is dev/test-only and has no place in a production image.
 COPY package.json bun.lock ./
 COPY client/package.json client/package.json
 COPY server/package.json server/package.json
 # server's postinstall (prisma generate) runs during the install below and
-# needs the schema present already — copy it ahead of the rest of the
-# source so this layer still only invalidates on dependency/schema changes.
+# needs the schema + config present already — copy them ahead of the rest
+# of the source so this layer still only invalidates on dependency/schema
+# changes, not on every source edit.
 COPY server/prisma server/prisma
+COPY server/prisma.config.ts server/prisma.config.ts
 COPY core/package.json core/package.json
 RUN bun install --frozen-lockfile --filter='./client' --filter='./server' --filter='./core'
 
